@@ -63,6 +63,9 @@ $(GEN_DIR)/%.o: $(GEN_DIR)/%.cc
 $(BUILD)/server/%.o: server/%.cc | $(BUILD)/server
 	$(CXX) $(CXXFLAGS) $(GRPC_CFLAGS) -Iserver -I$(GEN_DIR) -c $< -o $@
 
+$(BUILD)/server/test_bounded_queue: server/tests/test_bounded_queue.cc | $(BUILD)/server
+	$(CXX) $(CXXFLAGS) -Iserver $< -o $@
+
 $(BUILD)/%.o: index/%.cc | $(BUILD)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
