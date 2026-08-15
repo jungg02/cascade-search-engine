@@ -1,0 +1,49 @@
+{
+  "engine": "cascade-wand",
+  "query_set": "dl20",
+  "config": {
+    "engine": "cascade-wand",
+    "query_set": "dl20",
+    "run_path": "runs/cascade-wand.dl20.txt",
+    "k1": 0.9,
+    "b": 0.4,
+    "hits": 1000,
+    "analyzer": "EnglishAnalyzer (Porter stemming + stopwords), targets Anserini default",
+    "num_queries": 54,
+    "wall_seconds": 0.9580765420105308
+  },
+  "metrics": {
+    "ndcg_cut_10": 0.47850240283764794,
+    "ndcg_cut_100": 0.49003805774040576,
+    "mrr_10": 0.6544973544973545,
+    "recall_100": 0.5643130912165106,
+    "recall_1000": 0.7885876588780213
+  },
+  "num_queries": 54,
+  "rel_threshold": 2,
+  "run_depth": 1000,
+  "shallow_metrics": [],
+  "pytrec_eval_agreement": {
+    "max_abs_difference": 5.551115123125783e-17,
+    "per_metric": {
+      "ndcg_cut_10": 5.551115123125783e-17,
+      "ndcg_cut_100": 0.0,
+      "recall_100": 0.0,
+      "recall_1000": 0.0,
+      "mrr_10": 0.0
+    }
+  },
+  "provenance": {
+    "timestamp_utc": "2026-08-15T03:45:46.873807+00:00",
+    "git_sha": "44b2f406ace283db0c965e59f4e06b0d1bb30475",
+    "git_dirty": true,
+    "hardware": {
+      "model": "Mac14,2",
+      "cpu": "Apple M2",
+      "cores": "8",
+      "memory_bytes": "8589934592",
+      "platform": "macOS-26.3.1-arm64-arm-64bit"
+    },
+    "python": "3.12.7"
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "query_set": "dev",
+  "sample_size": 6980,
+  "seed": 0,
+  "k1": 0.9,
+  "b": 0.4,
+  "analyzer": "EnglishAnalyzer (Porter stemming + stopwords), targets Anserini default",
+  "results": [
+    {
+      "engine": "cascade-daat-or",
+      "num_queries": 6980,
+      "hits": 10,
+      "mean_postings_scored": 1054955.1176217764,
+      "mean_full_evaluations": 953085.4226361031,
+      "mean_blocks_decoded": 8244.104871060172,
+      "mean_candidates_seen": 953085.4226361031,
+      "serial_latency_us": {
+        "count": 6980,
+        "min_us": 42.125,
+        "p50_us": 9322.958,
+        "p95_us": 41286.75,
+        "p99_us": 69183.334,
+        "p999_us": 107121.125,
+        "max_us": 236499.375
+      }
+    },
+    {
+      "engine": "cascade-wand",
+      "num_queries": 6980,
+      "hits": 10,
+      "mean_postings_scored": 15578.858595988539,
+      "mean_full_evaluations": 11740.766045845272,
+      "mean_blocks_decoded": 4826.44899713467,
+      "mean_candidates_seen": 105874.72679083094,
+      "serial_latency_us": {
+        "count": 6980,
+        "min_us": 51.625,
+        "p50_us": 2865.417,
+        "p95_us": 15884.916,
+        "p99_us": 29031.792,
+        "p999_us": 54207.917,
+        "max_us": 76495.167
+      }
+    },
+    {
+      "engine": "cascade-blockmax-wand",
+      "num_queries": 6980,
+      "hits": 10,
+      "mean_postings_scored": 3229.4921203438394,
+      "mean_full_evaluations": 1598.2047277936963,
+      "mean_blocks_decoded": 7212.900143266475,
+      "mean_candidates_seen": 56089.22994269341,
+      "serial_latency_us": {
+        "count": 6980,
+        "min_us": 113.667,
+        "p50_us": 4025.666,
+        "p95_us": 23051.917,
+        "p99_us": 41332.417,
+        "p999_us": 73382.083,
+        "max_us": 104011.875
+      }
+    }
+  ],
+  "provenance": {
+    "timestamp_utc": "2026-08-15T03:37:53.365342+00:00",
+    "git_sha": "44b2f406ace283db0c965e59f4e06b0d1bb30475",
+    "git_dirty": true,
+    "hardware": {
+      "model": "Mac14,2",
+      "cpu": "Apple M2",
+      "cores": "8",
+      "memory_bytes": "8589934592",
+      "platform": "macOS-26.3.1-arm64-arm-64bit"
+    },
+    "python": "3.12.7"
+  }
+}
