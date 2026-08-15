@@ -12,7 +12,7 @@ Full design: [`CASCADE_SEARCH_PLAN.md`](CASCADE_SEARCH_PLAN.md).
 |---|---|---|
 | 0 — Harness | `bench/baselines.md` | **done** |
 | 1 — C++ index + BlockMax-WAND | `bench/phase1.md` | **done** |
-| 2 — Serving, sharding, tail latency | capacity statement | not started |
+| 2 — Serving, sharding, tail latency | capacity statement | sub-project A done |
 | 3 — Dense recall | ANN Pareto frontier | not started |
 | 4 — Ranking cascade | batching + precision tables | not started |
 | 5 — Video, multi-field | field ablations | not started |
@@ -28,8 +28,10 @@ cpp/index/      analyzer, Porter stemmer, postings codec, index builder
 cpp/query/      DAAT-OR, WAND, BlockMax-WAND over a shared cursor
 cpp/bindings/   pybind11 module (one analyzer, one BM25, no offline/online skew)
 cpp/tests/      correctness: BMW/WAND top-k == exhaustive top-k, on a synthetic corpus
+cpp/server/     gRPC service: bounded queue + worker pool + LRU cache
+py/server/      server client, process manager, throughput/cache experiments
 bench/results/  raw JSON per run — committed
-bench/          baselines.md, phase1.md, plots, REPORT.md
+bench/          baselines.md, phase1.md, phase2a.md, plots, REPORT.md
 .tools/         JDK 21 and the Anserini fatjar (gitignored)
 data/ indexes/ runs/   corpora, built indexes, and run files (gitignored)
 ```
@@ -86,6 +88,26 @@ uv run python -m baselines.phase1_report       # -> bench/results/cascade-*.json
 
 `cascade_bm25` must run first: `phase1_report` reads `runs/manifest.json`, which
 `cascade_bm25` (not tracked in git — it's under `/runs/`) is what populates it.
+
+## Running Phase 2 (sub-project A: single-node server)
+
+Needs the Phase 1 index and `pkg-config` pointed at Anaconda's grpc/protobuf
+(`brew install pkg-config` if you don't have it; the Makefile defaults
+`PKG_CONFIG_PATH` to `/opt/anaconda3/lib/pkgconfig`, override it if your
+grpc/protobuf live elsewhere).
+
+```bash
+export PYTHONPATH=py
+uv run python -m server.gen_proto        # generates py/server/generated/*.py
+make -C cpp all                          # builds cpp/build/server_bin
+uv run python -m server.throughput_knee  # -> bench/results/server-throughput-knee.json
+uv run python -m server.cache_sensitivity  # -> bench/results/server-cache-sensitivity.json
+uv run python -m server.report           # -> bench/phase2a.md
+```
+
+The server itself (`cpp/build/server_bin <index_dir> [--port=P] [--workers=N]
+[--queue-depth=D] [--cache-capacity=C] [--algorithm=wand|blockmax-wand|daat-or]`)
+can also be run standalone for manual testing.
 
 ## Ground rules
 
