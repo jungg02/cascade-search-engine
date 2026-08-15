@@ -1,0 +1,57 @@
+{
+  "engine": "tantivy-0.26.0",
+  "query_set": "dev",
+  "config": {
+    "engine": "tantivy-0.26.0",
+    "query_set": "dev",
+    "run_path": "runs/tantivy.dev.txt",
+    "k1": 1.2,
+    "b": 0.75,
+    "hits": 1000,
+    "analyzer": "en_stem (stemming, no stopword removal)",
+    "serial_latency_us": {
+      "count": 6980,
+      "min_us": 214.792,
+      "p50_us": 48423.417,
+      "p95_us": 98705.958,
+      "p99_us": 128890.917,
+      "p999_us": 249479.459,
+      "max_us": 522432.625
+    },
+    "engine_version_string": "tantivy v0.26.0, index_format v7"
+  },
+  "metrics": {
+    "ndcg_cut_10": 0.22810974522917438,
+    "ndcg_cut_100": 0.2879859110523732,
+    "mrr_10": 0.18191630281529997,
+    "recall_100": 0.6697707736389685,
+    "recall_1000": 0.859204871060172
+  },
+  "num_queries": 6980,
+  "rel_threshold": 1,
+  "run_depth": 1000,
+  "shallow_metrics": [],
+  "pytrec_eval_agreement": {
+    "max_abs_difference": 0.0,
+    "per_metric": {
+      "ndcg_cut_10": 0.0,
+      "ndcg_cut_100": 0.0,
+      "recall_100": 0.0,
+      "recall_1000": 0.0,
+      "mrr_10": 0.0
+    }
+  },
+  "provenance": {
+    "timestamp_utc": "2026-08-15T01:58:41.340619+00:00",
+    "git_sha": "35b8ec5a6689869801a0ff25deec77b123e7f799",
+    "git_dirty": true,
+    "hardware": {
+      "model": "Mac14,2",
+      "cpu": "Apple M2",
+      "cores": "8",
+      "memory_bytes": "8589934592",
+      "platform": "macOS-26.3.1-arm64-arm-64bit"
+    },
+    "python": "3.12.7"
+  }
+}

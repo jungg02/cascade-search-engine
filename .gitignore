@@ -1,0 +1,21 @@
+# Large corpora, built indexes, and generated run files — regenerable from
+# the harness, not source. See bench/baselines.md's own note on this.
+/data/
+/indexes/
+/runs/
+
+# C/C++ build output
+cpp/build/
+
+# Compiled Python extension (rebuilt by `make all`); keep .so out, platform-specific
+py/*.so
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local editor/OS/tooling cruft
+.DS_Store
+.claude/settings.local.json
