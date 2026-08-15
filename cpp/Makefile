@@ -42,6 +42,8 @@ GEN_DIR   := $(BUILD)/generated
 PROTOC ?= protoc
 GRPC_CPP_PLUGIN ?= grpc_cpp_plugin
 
+SERVER_COMMON := $(BUILD)/server/search_service.o $(GEN_DIR)/search.pb.o $(GEN_DIR)/search.grpc.pb.o
+
 .PHONY: all clean test
 # bench_query (the Phase 1 exit-artifact driver) is not written yet.
 all: $(BUILD)/build_index $(BUILD)/test_index ../py/cascade_index$(PY_SUFFIX)
@@ -71,6 +73,9 @@ $(BUILD)/server/test_lru_cache: server/tests/test_lru_cache.cc | $(BUILD)/server
 
 $(BUILD)/server/test_worker_pool: server/tests/test_worker_pool.cc | $(BUILD)/server
 	$(CXX) $(CXXFLAGS) -Iserver $< -o $@
+
+$(BUILD)/server/test_search_service: server/tests/test_search_service.cc $(COMMON) $(QUERY) $(SERVER_COMMON) | $(BUILD)/server
+	$(CXX) $(CXXFLAGS) $(GRPC_CFLAGS) -Iserver -I$(GEN_DIR) $^ $(GRPC_LIBS) -Wl,-rpath,/opt/anaconda3/lib -o $@
 
 $(BUILD)/%.o: index/%.cc | $(BUILD)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
