@@ -59,35 +59,33 @@ def main() -> None:
 
     queries = [text for _, text in sorted(load_queries("dev").items())]
 
-    with ServerProcess(
-        INDEX_DIR, port=args.port, workers=args.server_workers,
-        queue_depth=args.queue_depth, cache_capacity=args.cache_capacity,
-        algorithm=args.algorithm,
-    ) as server:
-        client = SearchClient(server.address)
-
-        points = []
-        for qps in args.qps:
+    points = []
+    for qps in args.qps:
+        with ServerProcess(
+            INDEX_DIR, port=args.port, workers=args.server_workers,
+            queue_depth=args.queue_depth, cache_capacity=args.cache_capacity,
+            algorithm=args.algorithm,
+        ) as server:
+            client = SearchClient(server.address)
             repeats = [
                 measure(client, qps, args.duration, args.client_workers, args.hits,
                         queries, args.zipf_s, seed)
                 for seed in range(args.repeats)
             ]
-            p99s = [r["latency"]["p99_us"] for r in repeats]
-            point = {
-                "offered_qps": qps,
-                "repeats": repeats,
-                "p99_us_across_repeats": {
-                    "min": min(p99s), "median": statistics.median(p99s), "max": max(p99s),
-                },
-            }
-            points.append(point)
-            median = statistics.median([r["latency"]["p50_us"] for r in repeats])
-            errors = sum(r["errors"] for r in repeats)
-            print(f"{qps:>6.0f} QPS   p50={median/1000:7.2f}ms   "
-                  f"p99={statistics.median(p99s)/1000:7.2f}ms   errors={errors}")
-
-        client.close()
+            client.close()
+        p99s = [r["latency"]["p99_us"] for r in repeats]
+        point = {
+            "offered_qps": qps,
+            "repeats": repeats,
+            "p99_us_across_repeats": {
+                "min": min(p99s), "median": statistics.median(p99s), "max": max(p99s),
+            },
+        }
+        points.append(point)
+        median = statistics.median([r["latency"]["p50_us"] for r in repeats])
+        errors = sum(r["errors"] for r in repeats)
+        print(f"{qps:>6.0f} QPS   p50={median/1000:7.2f}ms   "
+              f"p99={statistics.median(p99s)/1000:7.2f}ms   errors={errors}")
 
     output = {
         "server": "cascade-grpc",
