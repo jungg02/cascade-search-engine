@@ -1,0 +1,50 @@
+{
+  "engine": "lucene-anserini-1.0.0",
+  "query_set": "dl20",
+  "config": {
+    "engine": "lucene-anserini-1.0.0",
+    "query_set": "dl20",
+    "run_path": "runs/lucene.dl20.k1_0.9.b_0.4.txt",
+    "k1": 0.9,
+    "b": 0.4,
+    "hits": 1000,
+    "analyzer": "EnglishAnalyzer (Porter stemming + stopwords), Anserini default",
+    "bm25_accurate_doc_lengths": false,
+    "wall_seconds": 1.296138833014993,
+    "note": "wall time includes JVM startup; see the loadgen runs for latency"
+  },
+  "metrics": {
+    "ndcg_cut_10": 0.47691377991569783,
+    "ndcg_cut_100": 0.49097827552070905,
+    "mrr_10": 0.665299823633157,
+    "recall_100": 0.5622840503081435,
+    "recall_1000": 0.786473333545097
+  },
+  "num_queries": 54,
+  "rel_threshold": 2,
+  "run_depth": 1000,
+  "shallow_metrics": [],
+  "pytrec_eval_agreement": {
+    "max_abs_difference": 1.1102230246251565e-16,
+    "per_metric": {
+      "ndcg_cut_10": 1.1102230246251565e-16,
+      "ndcg_cut_100": 5.551115123125783e-17,
+      "recall_100": 0.0,
+      "recall_1000": 0.0,
+      "mrr_10": 0.0
+    }
+  },
+  "provenance": {
+    "timestamp_utc": "2026-08-15T01:58:06.571807+00:00",
+    "git_sha": "35b8ec5a6689869801a0ff25deec77b123e7f799",
+    "git_dirty": true,
+    "hardware": {
+      "model": "Mac14,2",
+      "cpu": "Apple M2",
+      "cores": "8",
+      "memory_bytes": "8589934592",
+      "platform": "macOS-26.3.1-arm64-arm-64bit"
+    },
+    "python": "3.12.7"
+  }
+}

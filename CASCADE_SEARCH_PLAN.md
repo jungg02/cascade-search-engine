@@ -341,20 +341,3 @@ Leave the placeholders as placeholders until you have the measurement. Fabricate
 
 If you can answer these from your own measurements rather than from a blog post, you are ahead of most candidates for this role.
 
----
-
-## 9. Sequencing against your calendar
-
-Assuming ~8h/week alongside the GovTech internship:
-
-| Weeks | Phase | Cumulative state |
-|---|---|---|
-| 1 | 0 | harness + baselines |
-| 2–4 | 1 | **first resume-worthy milestone** |
-| 5–6 | 2 | **minimum defensible version complete** |
-| 7–8 | 3 | Pareto frontier |
-| 9–10 | 4 | full cascade + GPU |
-| 11–12 | 5 | video/multimodal |
-| 13+ | 6 | stretch |
-
-If applications force a cut, cut from the back. Phases 0–2 finished and measured beats all six phases half-built.
