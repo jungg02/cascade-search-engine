@@ -113,6 +113,25 @@ void test_different_queries_miss_independently(const Index& index) {
   check(!dog_resp.cache_hit(), "a genuinely different query is not a cache hit off fox's entry");
 }
 
+void test_different_k_misses_independently(const Index& index) {
+  std::cout << "distinct k\n";
+  SearchServiceImpl service(&index, Algorithm::kWand, /*num_workers=*/2,
+                            /*queue_depth=*/4, /*cache_capacity=*/8);
+
+  SearchResponse k10_resp;
+  auto k10_req = make_request("fox", /*k=*/10);
+  check(service.Query(nullptr, &k10_req, &k10_resp).ok(), "k=10 call succeeds");
+  check(!k10_resp.cache_hit(), "k=10 call is a miss");
+
+  SearchResponse k1_resp;
+  auto k1_req = make_request("fox", /*k=*/1);
+  check(service.Query(nullptr, &k1_req, &k1_resp).ok(), "k=1 call succeeds");
+  check(!k1_resp.cache_hit(),
+        "same query text with a different k is not a cache hit off the k=10 entry");
+  check(k1_resp.results_size() == 1,
+        "k=1 call returns exactly 1 result, not the k=10 call's result count");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -123,6 +142,7 @@ int main(int argc, char** argv) {
   test_cache_miss_then_hit(index);
   test_normalization_shares_cache_entry(index);
   test_different_queries_miss_independently(index);
+  test_different_k_misses_independently(index);
 
   fs::remove_all(index_dir.parent_path());
   std::cout << (failures == 0 ? "\nall checks passed\n"
