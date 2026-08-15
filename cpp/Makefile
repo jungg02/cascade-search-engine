@@ -46,7 +46,10 @@ SERVER_COMMON := $(BUILD)/server/search_service.o $(GEN_DIR)/search.pb.o $(GEN_D
 
 .PHONY: all clean test
 # bench_query (the Phase 1 exit-artifact driver) is not written yet.
-all: $(BUILD)/build_index $(BUILD)/test_index ../py/cascade_index$(PY_SUFFIX)
+all: $(BUILD)/build_index $(BUILD)/test_index ../py/cascade_index$(PY_SUFFIX) \
+     $(BUILD)/server_bin $(BUILD)/server/test_bounded_queue \
+     $(BUILD)/server/test_lru_cache $(BUILD)/server/test_worker_pool \
+     $(BUILD)/server/test_search_service
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -62,7 +65,10 @@ $(GEN_DIR)/search.pb.cc $(GEN_DIR)/search.pb.h $(GEN_DIR)/search.grpc.pb.cc $(GE
 $(GEN_DIR)/%.o: $(GEN_DIR)/%.cc
 	$(CXX) $(CXXFLAGS) $(GRPC_CFLAGS) -I$(GEN_DIR) -c $< -o $@
 
-$(BUILD)/server/%.o: server/%.cc | $(BUILD)/server
+# search_service.cc includes search.grpc.pb.h, but SERVER_COMMON lists
+# search_service.o before the .pb.o files — so on a clean tree make compiles
+# it before protoc has run. Depend on the generated header directly.
+$(BUILD)/server/%.o: server/%.cc $(GEN_DIR)/search.grpc.pb.h | $(BUILD)/server
 	$(CXX) $(CXXFLAGS) $(GRPC_CFLAGS) -Iserver -I$(GEN_DIR) -c $< -o $@
 
 $(BUILD)/server/test_bounded_queue: server/tests/test_bounded_queue.cc | $(BUILD)/server
@@ -75,6 +81,9 @@ $(BUILD)/server/test_worker_pool: server/tests/test_worker_pool.cc | $(BUILD)/se
 	$(CXX) $(CXXFLAGS) -Iserver $< -o $@
 
 $(BUILD)/server/test_search_service: server/tests/test_search_service.cc $(COMMON) $(QUERY) $(SERVER_COMMON) | $(BUILD)/server
+	$(CXX) $(CXXFLAGS) $(GRPC_CFLAGS) -Iserver -I$(GEN_DIR) $^ $(GRPC_LIBS) -Wl,-rpath,/opt/anaconda3/lib -o $@
+
+$(BUILD)/server_bin: server/main.cc $(COMMON) $(QUERY) $(SERVER_COMMON) | $(BUILD)/server
 	$(CXX) $(CXXFLAGS) $(GRPC_CFLAGS) -Iserver -I$(GEN_DIR) $^ $(GRPC_LIBS) -Wl,-rpath,/opt/anaconda3/lib -o $@
 
 $(BUILD)/%.o: index/%.cc | $(BUILD)
@@ -96,8 +105,14 @@ $(BUILD)/test_index: tests/test_index.cc $(COMMON) $(QUERY) | $(BUILD)
 ../py/cascade_index$(PY_SUFFIX): bindings/module.cc $(COMMON) $(QUERY) | $(BUILD)
 	$(CXX) $(CXXFLAGS) -shared -fPIC -undefined dynamic_lookup $(PY_INCLUDES) $^ -o $@
 
-test: $(BUILD)/test_index
+test: $(BUILD)/test_index $(BUILD)/server/test_bounded_queue \
+      $(BUILD)/server/test_lru_cache $(BUILD)/server/test_worker_pool \
+      $(BUILD)/server/test_search_service
 	$(BUILD)/test_index
+	$(BUILD)/server/test_bounded_queue
+	$(BUILD)/server/test_lru_cache
+	$(BUILD)/server/test_worker_pool
+	$(BUILD)/server/test_search_service
 
 clean:
 	rm -rf $(BUILD) ../py/cascade_index*.so
