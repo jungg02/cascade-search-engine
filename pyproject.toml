@@ -26,5 +26,5 @@ dev = [
 package = false
 
 [tool.pytest.ini_options]
-testpaths = ["py/tests"]
+testpaths = ["py/tests", "py/server/tests"]
 pythonpath = ["py"]
