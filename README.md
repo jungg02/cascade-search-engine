@@ -11,7 +11,7 @@ Full design: [`CASCADE_SEARCH_PLAN.md`](CASCADE_SEARCH_PLAN.md).
 | Phase | What it produces | State |
 |---|---|---|
 | 0 — Harness | `bench/baselines.md` | **done** |
-| 1 — C++ index + BlockMax-WAND | pruning/latency table | in progress |
+| 1 — C++ index + BlockMax-WAND | `bench/phase1.md` | **done** |
 | 2 — Serving, sharding, tail latency | capacity statement | not started |
 | 3 — Dense recall | ANN Pareto frontier | not started |
 | 4 — Ranking cascade | batching + precision tables | not started |
@@ -22,16 +22,16 @@ Full design: [`CASCADE_SEARCH_PLAN.md`](CASCADE_SEARCH_PLAN.md).
 
 ```
 py/harness/     metrics, open-loop load generation, latency recording, run files
-py/baselines/   Lucene (Anserini) and Tantivy BM25 baselines
+py/baselines/   Lucene (Anserini) and Tantivy BM25 baselines, cascade C++ index driver
 py/tests/       pytest suite
 cpp/index/      analyzer, Porter stemmer, postings codec, index builder
 cpp/query/      DAAT-OR, WAND, BlockMax-WAND over a shared cursor
 cpp/bindings/   pybind11 module (one analyzer, one BM25, no offline/online skew)
-cpp/tests/      correctness: BMW top-k == exhaustive top-k
+cpp/tests/      correctness: BMW/WAND top-k == exhaustive top-k, on a synthetic corpus
 bench/results/  raw JSON per run — committed
-bench/          baselines.md, plots, REPORT.md
+bench/          baselines.md, phase1.md, plots, REPORT.md
 .tools/         JDK 21 and the Anserini fatjar (gitignored)
-data/ indexes/ runs/   corpora and derived artifacts (gitignored)
+data/ indexes/ runs/   corpora, built indexes, and run files (gitignored)
 ```
 
 Build the C++ side with `make -C cpp`. It needs no dependencies beyond
@@ -68,6 +68,24 @@ uv run python -m baselines.tantivy_bm25  # second independent BM25
 uv run python -m baselines.latency       # open-loop latency against Tantivy
 uv run python -m baselines.report        # -> bench/results/*.json, bench/baselines.md
 ```
+
+## Running Phase 1
+
+Needs `data/msmarco-passage.tsv` (from `baselines.export` above) and the C++ side
+built (`make -C cpp all`, needs `pybind11` from `uv sync --extra dev`).
+
+```bash
+export PYTHONPATH=py
+uv run python -m baselines.cascade_bm25        # build index, WAND+BMW NDCG runs,
+                                                # DAAT-OR on dl19+dl20 for the
+                                                # equivalence check
+uv run python -m baselines.cascade_query_cost  # postings/evaluations/p99 table
+uv run python -m baselines.phase1_report       # -> bench/results/cascade-*.json,
+                                                #    bench/phase1.md
+```
+
+`cascade_bm25` must run first: `phase1_report` reads `runs/manifest.json`, which
+`cascade_bm25` (not tracked in git — it's under `/runs/`) is what populates it.
 
 ## Ground rules
 
