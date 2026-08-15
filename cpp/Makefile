@@ -69,6 +69,9 @@ $(BUILD)/server/test_bounded_queue: server/tests/test_bounded_queue.cc | $(BUILD
 $(BUILD)/server/test_lru_cache: server/tests/test_lru_cache.cc | $(BUILD)/server
 	$(CXX) $(CXXFLAGS) -Iserver $< -o $@
 
+$(BUILD)/server/test_worker_pool: server/tests/test_worker_pool.cc | $(BUILD)/server
+	$(CXX) $(CXXFLAGS) -Iserver $< -o $@
+
 $(BUILD)/%.o: index/%.cc | $(BUILD)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
