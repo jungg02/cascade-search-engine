@@ -1,0 +1,22 @@
+syntax = "proto3";
+package cascade;
+
+service Search {
+  rpc Query(SearchRequest) returns (SearchResponse);
+}
+
+message SearchRequest {
+  string query = 1;
+  uint32 k = 2;
+}
+
+message SearchResult {
+  uint32 docid = 1;
+  float score = 2;
+}
+
+message SearchResponse {
+  repeated SearchResult results = 1;
+  bool cache_hit = 2;
+  uint32 queue_wait_us = 3;
+}

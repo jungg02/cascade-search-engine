@@ -9,6 +9,7 @@ cpp/build/
 
 # Compiled Python extension (rebuilt by `make all`); keep .so out, platform-specific
 py/*.so
+py/server/generated/
 
 # Python
 .venv/
