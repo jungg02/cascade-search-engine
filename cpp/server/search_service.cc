@@ -42,7 +42,7 @@ std::string SearchServiceImpl::normalize(const std::string& query) {
 }
 
 void SearchServiceImpl::handle_query(const SearchRequest& request, SearchResponse* response) {
-  const std::string key = normalize(request.query());
+  const std::string key = normalize(request.query()) + "|" + std::to_string(request.k());
 
   std::vector<Result> cached;
   if (cache_.get(key, &cached)) {
