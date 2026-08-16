@@ -83,12 +83,28 @@ int main(int argc, char** argv) {
 
   // Bounds the gRPC layer's own dispatch-thread pool so it can't grow
   // unbounded under load: every request that isn't shed either occupies a
-  // worker or sits in the queue, so this many gRPC threads blocked on a
-  // future covers the worst case without growing further. This is not the
-  // concurrency control the plan asks for — WorkerPool is — it just keeps
+  // worker or sits in the queue, so workers + queue_depth gRPC threads
+  // blocked on a future covers that worst case. This is not the concurrency
+  // control the plan asks for — WorkerPool/BoundedQueue is — it just keeps
   // gRPC's own bookkeeping bounded too.
+  //
+  // +8 headroom, not workers + queue_depth exactly: with no headroom, gRPC's
+  // own admission control exactly coincides with BoundedQueue's capacity, so
+  // gRPC always rejects the (N+1)th concurrent call with its own
+  // RESOURCE_EXHAUSTED ("Server Threadpool Exhausted") before that call can
+  // ever reach try_submit() — BoundedQueue's own "queue full" rejection path
+  // is then dead code from the network's perspective, for any workers/
+  // queue_depth split, since a caller can only ever call try_submit() while
+  // holding one of these threads. Measured directly: 150 concurrent requests
+  // over 150 separate channels against workers=1/queue_depth=1 (quota=2)
+  // produced 14 RESOURCE_EXHAUSTED responses, 0 of 14 with detail "queue
+  // full" — all from gRPC's own quota. +8 gives gRPC enough slack that
+  // requests beyond BoundedQueue's own capacity can still get a dispatch
+  // thread and reach try_submit(), making its real rejection observable,
+  // while remaining a small fixed buffer rather than defeating the
+  // fixed-size intent of the pool.
   grpc::ResourceQuota quota;
-  quota.SetMaxThreads(static_cast<int>(flags.workers + flags.queue_depth));
+  quota.SetMaxThreads(static_cast<int>(flags.workers + flags.queue_depth + 8));
   builder.SetResourceQuota(quota);
 
   std::unique_ptr<grpc::Server> server = builder.BuildAndStart();
