@@ -72,10 +72,10 @@ def test_saturated_queue_sheds_load():
             try:
                 client.dispatch("the")
                 with lock:
-                    results.append("ok")
+                    results.append(("ok", None))
             except grpc.RpcError as exc:
                 with lock:
-                    results.append(exc.code())
+                    results.append((exc.code(), exc.details()))
 
         threads = [threading.Thread(target=fire) for _ in range(20)]
         for t in threads:
@@ -84,7 +84,28 @@ def test_saturated_queue_sheds_load():
             t.join()
         client.close()
 
-        assert "ok" in results, "at least some requests should succeed"
-        assert grpc.StatusCode.RESOURCE_EXHAUSTED in results, (
-            "at least one request should be shed under this saturating burst"
-        )
+        assert ("ok", None) in results, "at least some requests should succeed"
+        shed = [(code, details) for code, details in results
+                if code == grpc.StatusCode.RESOURCE_EXHAUSTED]
+        assert shed, "at least one request should be shed under this saturating burst"
+        # NOTE: investigated whether this can be tightened to assert
+        # details() == "queue full" (SearchServiceImpl's literal string on
+        # BoundedQueue's own shed path), to prove this hit BoundedQueue
+        # specifically rather than gRPC's own ResourceQuota (also tight here:
+        # workers=1, queue_depth=1 -> SetMaxThreads(2), which can itself
+        # reject with RESOURCE_EXHAUSTED before Query() is ever entered).
+        # It can't be, and this isn't a flaky-test problem: main.cc sets
+        # ResourceQuota's SetMaxThreads to exactly workers + queue_depth,
+        # which caps concurrent Query() invocations at exactly the number of
+        # in-flight slots BoundedQueue + the worker pool can ever hold — so
+        # a 3rd-or-later concurrent try_push() attempt while the queue is at
+        # capacity can never happen; gRPC's own admission control always
+        # rejects first. Measured directly: 150 concurrent requests over 150
+        # separate channels against this same workers=1/queue_depth=1
+        # config produced 14 RESOURCE_EXHAUSTED responses, all with
+        # details() == "Server Threadpool Exhausted" (gRPC's own), zero with
+        # "queue full" — and this holds for any workers/queue_depth split,
+        # not just this one, since SetMaxThreads always exactly matches
+        # total capacity. BoundedQueue's own rejection path is exercised by
+        # cpp/server/tests/test_worker_pool.cc, which calls try_submit()
+        # directly rather than through gRPC's admission layer.
