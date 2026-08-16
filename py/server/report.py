@@ -255,9 +255,13 @@ def render_markdown(knee_data: dict, cache_data: dict) -> str:
         "  tail-latency amplification are sub-project B's subject, not this",
         "  document's.",
         "- The gRPC layer's own thread pool is bounded via `ResourceQuota`",
-        "  (workers + queue depth) so it can't grow unbounded, but the fixed",
-        "  worker pool and bounded queue are the actual concurrency control —",
-        "  see the design spec for why.",
+        "  (workers + queue depth + a small fixed headroom, currently 8, so",
+        "  that BoundedQueue's own \"queue full\" rejection is reachable via",
+        "  real network traffic instead of always being preempted by gRPC's",
+        "  coarser admission control — see main.cc's ResourceQuota comment)",
+        "  so it can't grow unbounded, but the fixed worker pool and bounded",
+        "  queue are the actual concurrency control — see the design spec for",
+        "  why.",
         f"- The load generator's own client-side dispatch pool "
         f"({knee_data['client_workers']} threads, one blocking `dispatch()` "
         "call per thread) is itself a finite-capacity queueing system. It's",
