@@ -16,6 +16,7 @@ import statistics
 from pathlib import Path
 
 from harness.datasets import load_queries
+from harness.histogram import LatencyRecorder
 from harness.loadgen import run_open_loop
 from harness.runmeta import run_metadata
 from server.client import SearchClient
@@ -28,8 +29,43 @@ INDEX_DIR = REPO_ROOT / "indexes" / "cascade-msmarco-passage"
 
 def measure(client: SearchClient, qps: float, duration_s: float, workers: int,
             hits: int, queries: list[str], zipf_s: float, seed: int) -> dict:
+    # queue_wait_us comes straight off the response (SearchServiceImpl sets
+    # it from the server's own BoundedQueue) — this is what actually
+    # distinguishes "the server's bounded queue is backing up" from
+    # "run_open_loop's queue_delay is backing up" (that one measures time
+    # waiting for a free *client*-side ThreadPoolExecutor slot, not
+    # anything server-side). cache_hit is tracked the same way
+    # cache_sensitivity.py already does it, so this run reports its own
+    # actual hit rate instead of borrowing one from a different sweep.
+    server_queue_wait = LatencyRecorder()
+    cache_hits = 0
+    cache_total = 0
+
+    # Warm-up: pay the fixed mmap page-fault cost of first touching
+    # previously-untouched postings regions before the timed window, not
+    # during it. Confirmed against real 10s-duration sweep data (not
+    # assumed): only the lowest-QPS point tested (20 QPS, ~190-210 samples
+    # per repeat) shows a monotone repeat-to-repeat decay in p50/p99/service
+    # time (one run: p50 7.97ms -> 3.71ms -> 3.49ms, service 5.90ms ->
+    # 1.50ms -> 1.12ms), while 100 QPS and 200 QPS (5-10x more samples per
+    # repeat, same fixed cost) don't show it. That's the signature of a
+    # fixed per-process cost getting diluted by an ever-larger fraction of
+    # the run as offered rate rises, not a real capacity effect. Discarded
+    # here, before run_open_loop starts, so it's paid once up front instead
+    # of contaminating whichever repeat happens to run first.
+    for warmup_query in queries[:75]:
+        try:
+            client.dispatch(warmup_query, k=hits)
+        except Exception:
+            pass
+
     def dispatch(query: str) -> None:
-        client.dispatch(query, k=hits)
+        nonlocal cache_hits, cache_total
+        response = client.dispatch(query, k=hits)
+        server_queue_wait.record(response.queue_wait_us)
+        cache_total += 1
+        if response.cache_hit:
+            cache_hits += 1
 
     result = run_open_loop(
         dispatch=dispatch, queries=queries, qps=qps, duration_s=duration_s,
@@ -39,14 +75,26 @@ def measure(client: SearchClient, qps: float, duration_s: float, workers: int,
     # QPS, not a broken run: run_open_loop's own dispatch wrapper already
     # catches any exception and records it as an error rather than raising,
     # so a high error count at high QPS is exactly the knee showing up.
-    return result.summary()
+    summary = result.summary()
+    summary["server_queue_wait_us"] = server_queue_wait.summary()
+    summary["cache_hit_rate"] = cache_hits / cache_total if cache_total else 0.0
+    return summary
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--qps", type=float, nargs="+", default=[20, 40, 60, 80, 100, 120])
     parser.add_argument("--duration", type=float, default=10.0)
-    parser.add_argument("--client-workers", type=int, default=8)
+    # 32, not 8: at 8, run_open_loop's own client-side ThreadPoolExecutor
+    # (at most 8 requests in flight) becomes the bottleneck well before the
+    # server's queue_depth=64 could ever fill, so a sweep run at
+    # client-workers=8 can't tell "server capacity-limited" from "client
+    # dispatch-thread-limited" apart. 32 gives the client enough concurrency
+    # to actually pressure the server's queue at the QPS range this sweep
+    # tests; going much higher (e.g. 96+) risks a different artifact — CPU
+    # contention between client dispatch threads and the server's own
+    # worker threads, since both run on one 8-core machine here.
+    parser.add_argument("--client-workers", type=int, default=32)
     parser.add_argument("--hits", type=int, default=10)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--zipf-s", type=float, default=1.0)
