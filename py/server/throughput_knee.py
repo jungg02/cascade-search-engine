@@ -17,7 +17,7 @@ from pathlib import Path
 
 from harness.datasets import load_queries
 from harness.histogram import LatencyRecorder
-from harness.loadgen import run_open_loop
+from harness.loadgen import ZipfQuerySampler, run_open_loop
 from harness.runmeta import run_metadata
 from server.client import SearchClient
 from server.process import ServerProcess
@@ -41,21 +41,40 @@ def measure(client: SearchClient, qps: float, duration_s: float, workers: int,
     cache_hits = 0
     cache_total = 0
 
-    # Warm-up: pay the fixed mmap page-fault cost of first touching
-    # previously-untouched postings regions before the timed window, not
-    # during it. Confirmed against real 10s-duration sweep data (not
-    # assumed): only the lowest-QPS point tested (20 QPS, ~190-210 samples
-    # per repeat) shows a monotone repeat-to-repeat decay in p50/p99/service
-    # time (one run: p50 7.97ms -> 3.71ms -> 3.49ms, service 5.90ms ->
-    # 1.50ms -> 1.12ms), while 100 QPS and 200 QPS (5-10x more samples per
-    # repeat, same fixed cost) don't show it. That's the signature of a
-    # fixed per-process cost getting diluted by an ever-larger fraction of
-    # the run as offered rate rises, not a real capacity effect. Discarded
-    # here, before run_open_loop starts, so it's paid once up front instead
-    # of contaminating whichever repeat happens to run first.
-    for warmup_query in queries[:75]:
+    # Warm-up: pay whatever fixed per-process cost the first ~75 requests
+    # incur (most likely LRU fill fraction — the cache starting empty, not
+    # mmap page faults; see below) before the timed window, not during it.
+    # Confirmed against real 10s-duration sweep data (not assumed): only the
+    # lowest-QPS point tested (20 QPS, ~190-210 samples per repeat) shows a
+    # monotone repeat-to-repeat decay in p50/p99/service time (one run: p50
+    # 7.97ms -> 3.71ms -> 3.49ms, service 5.90ms -> 1.50ms -> 1.12ms), while
+    # 100 QPS and 200 QPS (5-10x more samples per repeat, same fixed cost)
+    # don't show it. That's the signature of a fixed per-process cost getting
+    # diluted by an ever-larger fraction of the run as offered rate rises,
+    # not a real capacity effect.
+    #
+    # Drawn from a real ZipfQuerySampler, not queries[:75]: `queries` is
+    # sorted by qid (an arbitrary order), and ZipfQuerySampler weights
+    # strictly by list index over whatever list it's given — so a raw
+    # queries[:75] slice is exactly the 75 highest-weighted draws under the
+    # real run's own sampler too, since it's the same list in the same
+    # order. That's ~52% of all traffic mass by Zipfian weight
+    # (H_75/H_6980), which deterministically preloaded exactly the queries
+    # most likely to be resampled and inflated the very number (cache hit
+    # rate) Important #3 already required be measured honestly — a review
+    # finding on the first version of this warm-up. Sampling instead makes
+    # the warm-up statistically indistinguishable from "75 real requests
+    # that happened to arrive early," which no longer privileges one
+    # specific ordering (and resolves the mmap-vs-LRU-fill question above:
+    # a uniform-content warm-up wouldn't touch this at all, but a resampled
+    # one does, so LRU fill fraction — not mmap paging — was always the
+    # more likely mechanism). seed + 1000, not seed, so the warm-up draws
+    # are decorrelated from the timed run's own sampler rather than
+    # reproducing its exact draw sequence.
+    warmup_sampler = ZipfQuerySampler(queries, s=zipf_s, seed=seed + 1000)
+    for _ in range(75):
         try:
-            client.dispatch(warmup_query, k=hits)
+            client.dispatch(warmup_sampler.sample(), k=hits)
         except Exception:
             pass
 
