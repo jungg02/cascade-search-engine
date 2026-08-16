@@ -69,7 +69,10 @@ def measure(client: SearchClient, zipf_s: float, qps: float, duration_s: float,
     return {
         "zipf_s": zipf_s,
         "hit_rate": hits_count / total if total else 0.0,
-        "hits": hits_count,
+        # "hit_count", not "hits": the output dict's top-level "hits" key is
+        # k (search depth, from args.hits) — same key name, different
+        # meaning, would collide in the same JSON file otherwise.
+        "hit_count": hits_count,
         "misses": misses_count,
         "hit_latency": hit_latency.summary(),
         "miss_latency": miss_latency.summary(),
