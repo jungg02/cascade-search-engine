@@ -37,8 +37,14 @@ class SearchClient:
         grpc.channel_ready_future(self._channel).result(timeout=timeout_s)
         self._stub = search_pb2_grpc.SearchStub(self._channel)
 
-    def dispatch(self, query: str, k: int = 10):
-        return self._stub.Query(search_pb2.SearchRequest(query=query, k=k))
+    def dispatch(self, query: str, k: int = 10, timeout_s: float = 30.0):
+        # Server-side Query() waits on future.wait() with no exception safety
+        # around it (a parked finding from Task 5) — an unbounded client-side
+        # wait would let one hung worker exception hang this call forever,
+        # and with it the whole load generator's dispatch thread pool.
+        # Generous but finite bounds the blast radius without cutting off
+        # legitimately slow requests.
+        return self._stub.Query(search_pb2.SearchRequest(query=query, k=k), timeout=timeout_s)
 
     def close(self) -> None:
         self._channel.close()

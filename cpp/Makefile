@@ -36,6 +36,11 @@ export PKG_CONFIG_PATH
 # pkg-config search path and fails to find protobuf/grpc++.
 GRPC_CFLAGS := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --cflags protobuf grpc++)
 GRPC_LIBS   := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs protobuf grpc++)
+# Derived, not hardcoded: a PKG_CONFIG_PATH override (see above) that points
+# at a grpc++/protobuf install elsewhere must also change where the linked
+# binaries look for their shared libs at runtime, or they compile but fail
+# to start.
+GRPC_LIBDIR := $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --variable=libdir grpc++)
 
 PROTO_DIR := ../proto
 GEN_DIR   := $(BUILD)/generated
@@ -81,10 +86,10 @@ $(BUILD)/server/test_worker_pool: server/tests/test_worker_pool.cc | $(BUILD)/se
 	$(CXX) $(CXXFLAGS) -Iserver $< -o $@
 
 $(BUILD)/server/test_search_service: server/tests/test_search_service.cc $(COMMON) $(QUERY) $(SERVER_COMMON) | $(BUILD)/server
-	$(CXX) $(CXXFLAGS) $(GRPC_CFLAGS) -Iserver -I$(GEN_DIR) $^ $(GRPC_LIBS) -Wl,-rpath,/opt/anaconda3/lib -o $@
+	$(CXX) $(CXXFLAGS) $(GRPC_CFLAGS) -Iserver -I$(GEN_DIR) $^ $(GRPC_LIBS) -Wl,-rpath,$(GRPC_LIBDIR) -o $@
 
 $(BUILD)/server_bin: server/main.cc $(COMMON) $(QUERY) $(SERVER_COMMON) | $(BUILD)/server
-	$(CXX) $(CXXFLAGS) $(GRPC_CFLAGS) -Iserver -I$(GEN_DIR) $^ $(GRPC_LIBS) -Wl,-rpath,/opt/anaconda3/lib -o $@
+	$(CXX) $(CXXFLAGS) $(GRPC_CFLAGS) -Iserver -I$(GEN_DIR) $^ $(GRPC_LIBS) -Wl,-rpath,$(GRPC_LIBDIR) -o $@
 
 $(BUILD)/%.o: index/%.cc | $(BUILD)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
