@@ -22,9 +22,25 @@ dev = [
     "grpcio-tools>=1.71",
 ]
 
+# hnswlib ships no macOS wheel (sdist only) and its setup.py doesn't point
+# clang++ at the SDK's libc++ headers (same class of issue as cpp/Makefile's
+# SDK_PATH note) -- `uv sync --extra dense` on a fresh checkout, or after
+# `uv cache clean`, needs:
+#   SDK_PATH=$(xcrun --show-sdk-path)
+#   CXXFLAGS="-isystem $SDK_PATH/usr/include/c++/v1" \
+#   CPPFLAGS="-isystem $SDK_PATH/usr/include/c++/v1" \
+#   uv sync --extra dense
+dense = [
+    "faiss-cpu>=1.15.0",
+    "hnswlib>=0.8.0",
+    "matplotlib>=3.11.1",
+    "sentence-transformers>=5.7.0",
+    "torch>=2.13.0",
+]
+
 [tool.uv]
 package = false
 
 [tool.pytest.ini_options]
-testpaths = ["py/tests", "py/server/tests"]
+testpaths = ["py/tests", "py/server/tests", "py/dense/tests"]
 pythonpath = ["py"]
