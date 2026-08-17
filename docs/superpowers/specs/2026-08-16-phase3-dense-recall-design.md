@@ -65,24 +65,38 @@ matrix is docid `dense-docids.npy[i]`). Written once; every downstream step
 the encoder again — re-encoding is the expensive step (minutes to an hour on
 this CPU), so nothing after this point re-runs it.
 
-Query embeddings for the 97 dl19+dl20 eval queries are encoded once into
-`data/dense-query-embeddings.npy` alongside a `data/dense-query-ids.json`
-ordering file, reused by ground truth, both ANN sweeps, and fusion.
+Query embeddings for two query sets are encoded once, reused by every
+downstream step: the **dev set** (6,980 queries — the ANN sweep's query
+source, see §6) and **dl19+dl20** (97 queries — the fusion table's query
+source, see §7), written to `data/dense-query-embeddings-{dev,dl19,dl20}.npy`
+with matching `*-ids.json` ordering files.
 
 ## 5. Component: exact ground truth
 
 `py/dense/ground_truth.py`. `faiss.IndexFlatIP` over the full 1M embedding
-matrix. For each of the 97 eval queries, exact top-1000 (docid, score) pairs.
-This serves two purposes:
+matrix, run separately for each of the two query sets from §4:
 
-- **Recall@100 reference** for both ANN sweeps (§6): an ANN result set's
-  recall@100 is "how many of the exact top-100 appear in the ANN top-100."
-- **The dense channel for fusion** (§7): using the *exact* dense ranking
-  rather than an ANN approximation there isolates "does fusion help" from
-  "how good is the ANN approximation," which is a separate question already
-  covered by the Pareto plot.
+- **dev (6,980 queries)** — exact top-1000 per query. This is the **recall@100
+  reference and latency query source for the ANN sweeps** (§6). Recall@100
+  here is "how many of the exact top-100 appear in the ANN top-100" — a
+  dense-vs-exact overlap measure, not an IR-relevance measure, so it needs no
+  qrels and can use dev's much larger query set for stability. This corrects
+  what the original draft of this spec assumed: Phase 1's own
+  `cascade_query_cost.py` gets p99 stability not by resampling a small query
+  set with replacement, but by running the full, naturally large dev set
+  directly ("off 500 samples is noisy... off 6,980 it isn't," per that
+  file's own comment) — this sub-project follows the same precedent.
+- **dl19+dl20 (97 queries)** — exact top-1000 per query. This is **the dense
+  channel for fusion** (§7): using the *exact* dense ranking rather than an
+  ANN approximation there isolates "does fusion help" from "how good is the
+  ANN approximation," which is a separate question already covered by the
+  Pareto plot. dl19+dl20 rather than dev here because fusion's NDCG@10 /
+  recall@1000 need real relevance judgments, and dev's judgments are a
+  different (sparser, binary) qrels set not aligned with what Phase 1's WAND
+  lexical run was evaluated against.
 
-Output: `bench/results/dense-ground-truth.json` — per query, top-1000
+Output: `bench/results/dense-ground-truth-dev.json` and
+`bench/results/dense-ground-truth-dl19-dl20.json` — per query, top-1000
 (docid, score), plus config (subset size, seed, model name, device).
 
 ## 6. Component: ANN sweeps (the money chart)
@@ -99,17 +113,21 @@ build-time; each value needs a full rebuild). For each built index, sweep
 
 **Per point, three measurements:**
 
-- **recall@100** vs. the exact ground truth (§5).
+- **recall@100** vs. the exact dev ground truth (§5).
 - **Latency** (p50/p95/p99, never mean — same rule as everywhere else in this
   repo). No server or queue is involved here — these are in-process library
   calls, not a system under concurrent load — so open-loop generation doesn't
-  apply. Instead: single-threaded, repeat the 97 eval queries with replacement
-  until there are enough samples for a stable p99 (same resampling approach
-  Phase 1's `bench_query` used), timing each individual `search()` call via
-  `harness.histogram.LatencyRecorder`.
-- **Memory footprint**: measured RSS delta (`resource.getrusage` before/after
-  the index build call) — a portable, dependency-free proxy for index size
-  that works uniformly across `hnswlib` and `faiss`.
+  apply. Instead: single-threaded, one `search()` call per dev query (6,980
+  samples — large enough for a stable p99 without resampling, per §5), timing
+  each call via `harness.histogram.LatencyRecorder`.
+- **Memory footprint**: measured RSS delta (`resource.getrusage(RUSAGE_SELF).ru_maxrss`
+  before/after the index build call) — a portable, dependency-free proxy for
+  index size that works uniformly across `hnswlib` and `faiss`. **Platform
+  gotcha, verified empirically on this machine:** `ru_maxrss` is in *bytes* on
+  macOS/Darwin, but *kilobytes* on Linux — the same field, different units by
+  platform. Since this project only runs on macOS, the code divides by 1e9 for
+  GB, with an assertion (or a comment citing this spec section) rather than a
+  silent 1000x error if it's ever run elsewhere.
 
 Output: `bench/results/dense-ann-sweep.json` — all 35 points (15 HNSW + 20
 IVF-PQ), each carrying its exact build/search config, recall@100, p50/p95/p99,
@@ -129,7 +147,8 @@ everything before Phase 3 was tables).
   read via `harness.runfile.read_run` against the `run_path` recorded for
   engine `cascade-wand` in `runs/manifest.json` (depth 1000). No re-query of
   the C++ index.
-- **Dense**: the exact brute-force top-1000 from §5.
+- **Dense**: the exact brute-force top-1000 from
+  `bench/results/dense-ground-truth-dl19-dl20.json` (§5).
 
 **Fusion methods** (compared against each channel alone — 4 rows total):
 
@@ -198,7 +217,8 @@ subset methodology and size stated up front as a limitation, the Pareto plot
 (recall@100 vs p99, memory as third dimension), the 4-row fusion table
 (NDCG@10, recall@1000), and full run configuration (model, device, subset
 size/seed, git SHA, hardware) per the project's "a number without its config
-is not a result" rule. `bench/results/dense-ground-truth.json`,
+is not a result" rule. `bench/results/dense-ground-truth-dev.json`,
+`bench/results/dense-ground-truth-dl19-dl20.json`,
 `bench/results/dense-ann-sweep.json`, `bench/results/dense-fusion.json` are
 committed raw JSON, same as every prior phase.
 
