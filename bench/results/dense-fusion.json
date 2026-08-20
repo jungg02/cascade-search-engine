@@ -1,0 +1,42 @@
+{
+  "query_sets": [
+    "dl19",
+    "dl20"
+  ],
+  "rrf_k": 60,
+  "results": {
+    "lexical_only": {
+      "ndcg_10": 0.4903274776223128,
+      "recall_1000": 0.7307855471204334,
+      "num_queries": 97
+    },
+    "dense_only": {
+      "ndcg_10": 0.7166673498813051,
+      "recall_1000": 0.8720063083448388,
+      "num_queries": 97
+    },
+    "rrf": {
+      "ndcg_10": 0.6413879104191169,
+      "recall_1000": 0.8927451824093473,
+      "num_queries": 97
+    },
+    "score_fusion": {
+      "ndcg_10": 0.6576892285419617,
+      "recall_1000": 0.8925103264321655,
+      "num_queries": 97
+    }
+  },
+  "provenance": {
+    "timestamp_utc": "2026-08-20T15:34:02.841107+00:00",
+    "git_sha": "4c55ab452dcf5f3c4c87db53cca775d457f20f3c",
+    "git_dirty": true,
+    "hardware": {
+      "model": "Mac14,2",
+      "cpu": "Apple M2",
+      "cores": "8",
+      "memory_bytes": "8589934592",
+      "platform": "macOS-26.3.1-arm64-arm-64bit"
+    },
+    "python": "3.12.7"
+  }
+}
