@@ -1,0 +1,634 @@
+{
+  "subset_size": 1000000,
+  "num_dev_queries": 6980,
+  "points": [
+    {
+      "structure": "hnsw",
+      "M": 16,
+      "ef_construction": 200,
+      "ef_search": 32,
+      "recall_at_100": 0.880484240687679,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 297.5,
+        "p50_us": 823.084,
+        "p95_us": 3607.625,
+        "p99_us": 7919.416,
+        "p999_us": 19643.667,
+        "max_us": 75546.167
+      },
+      "memory_gb": 1.499021312
+    },
+    {
+      "structure": "hnsw",
+      "M": 16,
+      "ef_construction": 200,
+      "ef_search": 64,
+      "recall_at_100": 0.880484240687679,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 295.875,
+        "p50_us": 792.25,
+        "p95_us": 2201.958,
+        "p99_us": 5529.916,
+        "p999_us": 15580.792,
+        "max_us": 117744.042
+      },
+      "memory_gb": 1.499021312
+    },
+    {
+      "structure": "hnsw",
+      "M": 16,
+      "ef_construction": 200,
+      "ef_search": 128,
+      "recall_at_100": 0.9056590257879656,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 377.084,
+        "p50_us": 967.167,
+        "p95_us": 3004.625,
+        "p99_us": 8103.0,
+        "p999_us": 31692.792,
+        "max_us": 127644.333
+      },
+      "memory_gb": 1.499021312
+    },
+    {
+      "structure": "hnsw",
+      "M": 16,
+      "ef_construction": 200,
+      "ef_search": 256,
+      "recall_at_100": 0.9522879656160459,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 657.208,
+        "p50_us": 1791.791,
+        "p95_us": 4323.542,
+        "p99_us": 10287.791,
+        "p999_us": 46031.708,
+        "max_us": 192616.792
+      },
+      "memory_gb": 1.499021312
+    },
+    {
+      "structure": "hnsw",
+      "M": 16,
+      "ef_construction": 200,
+      "ef_search": 512,
+      "recall_at_100": 0.9768295128939828,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 1119.958,
+        "p50_us": 3099.083,
+        "p95_us": 7425.542,
+        "p99_us": 19808.083,
+        "p999_us": 67430.166,
+        "max_us": 153027.666
+      },
+      "memory_gb": 1.499021312
+    },
+    {
+      "structure": "hnsw",
+      "M": 32,
+      "ef_construction": 200,
+      "ef_search": 32,
+      "recall_at_100": 0.923971346704871,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 374.5,
+        "p50_us": 1206.5,
+        "p95_us": 3036.083,
+        "p99_us": 7771.208,
+        "p999_us": 25850.292,
+        "max_us": 54596.25
+      },
+      "memory_gb": 0.09042329599999999
+    },
+    {
+      "structure": "hnsw",
+      "M": 32,
+      "ef_construction": 200,
+      "ef_search": 64,
+      "recall_at_100": 0.923971346704871,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 379.75,
+        "p50_us": 1267.0,
+        "p95_us": 3141.375,
+        "p99_us": 7574.417,
+        "p999_us": 15390.334,
+        "max_us": 25050.0
+      },
+      "memory_gb": 0.09042329599999999
+    },
+    {
+      "structure": "hnsw",
+      "M": 32,
+      "ef_construction": 200,
+      "ef_search": 128,
+      "recall_at_100": 0.942621776504298,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 443.417,
+        "p50_us": 1549.083,
+        "p95_us": 5060.25,
+        "p99_us": 14360.042,
+        "p999_us": 34119.292,
+        "max_us": 81787.75
+      },
+      "memory_gb": 0.09042329599999999
+    },
+    {
+      "structure": "hnsw",
+      "M": 32,
+      "ef_construction": 200,
+      "ef_search": 256,
+      "recall_at_100": 0.9748452722063037,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 702.167,
+        "p50_us": 2620.584,
+        "p95_us": 6891.208,
+        "p99_us": 20064.083,
+        "p999_us": 57282.958,
+        "max_us": 114872.916
+      },
+      "memory_gb": 0.09042329599999999
+    },
+    {
+      "structure": "hnsw",
+      "M": 32,
+      "ef_construction": 200,
+      "ef_search": 512,
+      "recall_at_100": 0.9890372492836675,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 1431.167,
+        "p50_us": 4751.791,
+        "p95_us": 13005.459,
+        "p99_us": 38661.333,
+        "p999_us": 88399.333,
+        "max_us": 181325.75
+      },
+      "memory_gb": 0.09042329599999999
+    },
+    {
+      "structure": "hnsw",
+      "M": 64,
+      "ef_construction": 200,
+      "ef_search": 32,
+      "recall_at_100": 0.9376547277936963,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 688.625,
+        "p50_us": 4948.041,
+        "p95_us": 19083.458,
+        "p99_us": 32619.417,
+        "p999_us": 119564.917,
+        "max_us": 346826.584
+      },
+      "memory_gb": 0.2396487679999999
+    },
+    {
+      "structure": "hnsw",
+      "M": 64,
+      "ef_construction": 200,
+      "ef_search": 64,
+      "recall_at_100": 0.9376547277936963,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 536.667,
+        "p50_us": 2522.709,
+        "p95_us": 11601.292,
+        "p99_us": 23741.167,
+        "p999_us": 44233.542,
+        "max_us": 92974.583
+      },
+      "memory_gb": 0.2396487679999999
+    },
+    {
+      "structure": "hnsw",
+      "M": 64,
+      "ef_construction": 200,
+      "ef_search": 128,
+      "recall_at_100": 0.9537091690544413,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 465.333,
+        "p50_us": 2058.167,
+        "p95_us": 7747.791,
+        "p99_us": 14832.792,
+        "p999_us": 30168.625,
+        "max_us": 118491.375
+      },
+      "memory_gb": 0.2396487679999999
+    },
+    {
+      "structure": "hnsw",
+      "M": 64,
+      "ef_construction": 200,
+      "ef_search": 256,
+      "recall_at_100": 0.9802936962750716,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 752.208,
+        "p50_us": 3075.167,
+        "p95_us": 8711.167,
+        "p99_us": 21650.042,
+        "p999_us": 50719.209,
+        "max_us": 97728.75
+      },
+      "memory_gb": 0.2396487679999999
+    },
+    {
+      "structure": "hnsw",
+      "M": 64,
+      "ef_construction": 200,
+      "ef_search": 512,
+      "recall_at_100": 0.9915902578796562,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 1722.708,
+        "p50_us": 7975.291,
+        "p95_us": 31717.583,
+        "p99_us": 64720.042,
+        "p999_us": 123483.875,
+        "max_us": 163964.125
+      },
+      "memory_gb": 0.2396487679999999
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 1024,
+      "m": 32,
+      "nbits": 8,
+      "nprobe": 1,
+      "recall_at_100": 0.312634670487106,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 76.542,
+        "p50_us": 93.875,
+        "p95_us": 111.292,
+        "p99_us": 126.875,
+        "p999_us": 272.083,
+        "max_us": 893.708
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 1024,
+      "m": 32,
+      "nbits": 8,
+      "nprobe": 8,
+      "recall_at_100": 0.46424641833810887,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 121.875,
+        "p50_us": 153.167,
+        "p95_us": 177.042,
+        "p99_us": 190.917,
+        "p999_us": 251.583,
+        "max_us": 704.667
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 1024,
+      "m": 32,
+      "nbits": 8,
+      "nprobe": 16,
+      "recall_at_100": 0.4807478510028653,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 176.708,
+        "p50_us": 219.375,
+        "p95_us": 251.75,
+        "p99_us": 273.75,
+        "p999_us": 374.25,
+        "max_us": 576.458
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 1024,
+      "m": 32,
+      "nbits": 8,
+      "nprobe": 32,
+      "recall_at_100": 0.4895601719197708,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 289.875,
+        "p50_us": 348.625,
+        "p95_us": 391.042,
+        "p99_us": 412.625,
+        "p999_us": 478.125,
+        "max_us": 514.083
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 1024,
+      "m": 32,
+      "nbits": 8,
+      "nprobe": 64,
+      "recall_at_100": 0.49355300859598855,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 510.542,
+        "p50_us": 603.583,
+        "p95_us": 671.542,
+        "p99_us": 739.417,
+        "p999_us": 1828.417,
+        "max_us": 2852.208
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 1024,
+      "m": 64,
+      "nbits": 8,
+      "nprobe": 1,
+      "recall_at_100": 0.3563266475644699,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 86.917,
+        "p50_us": 107.334,
+        "p95_us": 127.291,
+        "p99_us": 140.583,
+        "p999_us": 185.125,
+        "max_us": 275.084
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 1024,
+      "m": 64,
+      "nbits": 8,
+      "nprobe": 8,
+      "recall_at_100": 0.5998553008595988,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 165.791,
+        "p50_us": 218.125,
+        "p95_us": 262.084,
+        "p99_us": 284.167,
+        "p999_us": 543.167,
+        "max_us": 953.959
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 1024,
+      "m": 64,
+      "nbits": 8,
+      "nprobe": 16,
+      "recall_at_100": 0.6396991404011462,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 261.708,
+        "p50_us": 337.792,
+        "p95_us": 396.917,
+        "p99_us": 430.833,
+        "p999_us": 521.583,
+        "max_us": 1038.833
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 1024,
+      "m": 64,
+      "nbits": 8,
+      "nprobe": 32,
+      "recall_at_100": 0.6655530085959886,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 472.25,
+        "p50_us": 581.958,
+        "p95_us": 672.417,
+        "p99_us": 812.625,
+        "p999_us": 1710.25,
+        "max_us": 3317.042
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 1024,
+      "m": 64,
+      "nbits": 8,
+      "nprobe": 64,
+      "recall_at_100": 0.6809670487106017,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 988.292,
+        "p50_us": 1186.667,
+        "p95_us": 1316.25,
+        "p99_us": 1384.666,
+        "p999_us": 1888.75,
+        "max_us": 2471.083
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 4096,
+      "m": 32,
+      "nbits": 8,
+      "nprobe": 1,
+      "recall_at_100": 0.3003166189111748,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 156.791,
+        "p50_us": 168.625,
+        "p95_us": 190.167,
+        "p99_us": 198.0,
+        "p999_us": 244.042,
+        "max_us": 539.834
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 4096,
+      "m": 32,
+      "nbits": 8,
+      "nprobe": 8,
+      "recall_at_100": 0.4737134670487106,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 172.25,
+        "p50_us": 187.792,
+        "p95_us": 204.5,
+        "p99_us": 217.916,
+        "p999_us": 354.958,
+        "max_us": 531.333
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 4096,
+      "m": 32,
+      "nbits": 8,
+      "nprobe": 16,
+      "recall_at_100": 0.4962793696275072,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 186.667,
+        "p50_us": 206.958,
+        "p95_us": 226.25,
+        "p99_us": 250.208,
+        "p999_us": 363.709,
+        "max_us": 589.292
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 4096,
+      "m": 32,
+      "nbits": 8,
+      "nprobe": 32,
+      "recall_at_100": 0.5092808022922637,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 215.958,
+        "p50_us": 243.916,
+        "p95_us": 263.125,
+        "p99_us": 276.375,
+        "p999_us": 335.334,
+        "max_us": 501.333
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 4096,
+      "m": 32,
+      "nbits": 8,
+      "nprobe": 64,
+      "recall_at_100": 0.5165114613180516,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 278.542,
+        "p50_us": 316.625,
+        "p95_us": 352.167,
+        "p99_us": 403.083,
+        "p999_us": 697.5,
+        "max_us": 1056.834
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 4096,
+      "m": 64,
+      "nbits": 8,
+      "nprobe": 1,
+      "recall_at_100": 0.3172765042979943,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 163.208,
+        "p50_us": 178.166,
+        "p95_us": 199.75,
+        "p99_us": 208.834,
+        "p999_us": 359.375,
+        "max_us": 521.708
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 4096,
+      "m": 64,
+      "nbits": 8,
+      "nprobe": 8,
+      "recall_at_100": 0.5715028653295129,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 189.125,
+        "p50_us": 210.583,
+        "p95_us": 229.5,
+        "p99_us": 246.042,
+        "p999_us": 424.0,
+        "max_us": 537.958
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 4096,
+      "m": 64,
+      "nbits": 8,
+      "nprobe": 16,
+      "recall_at_100": 0.6199498567335243,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 214.166,
+        "p50_us": 242.625,
+        "p95_us": 262.917,
+        "p99_us": 277.291,
+        "p999_us": 368.833,
+        "max_us": 642.541
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 4096,
+      "m": 64,
+      "nbits": 8,
+      "nprobe": 32,
+      "recall_at_100": 0.654554441260745,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 266.583,
+        "p50_us": 307.666,
+        "p95_us": 341.958,
+        "p99_us": 397.708,
+        "p999_us": 766.833,
+        "max_us": 1997.167
+      },
+      "memory_gb": 0.0
+    },
+    {
+      "structure": "ivfpq",
+      "nlist": 4096,
+      "m": 64,
+      "nbits": 8,
+      "nprobe": 64,
+      "recall_at_100": 0.6780601719197707,
+      "latency_us": {
+        "count": 6980,
+        "min_us": 368.667,
+        "p50_us": 439.084,
+        "p95_us": 490.75,
+        "p99_us": 529.333,
+        "p999_us": 678.334,
+        "max_us": 1913.709
+      },
+      "memory_gb": 0.0
+    }
+  ],
+  "provenance": {
+    "timestamp_utc": "2026-08-20T12:17:46.406014+00:00",
+    "git_sha": "009e697299cc3fedf1a929b681416e7db1543537",
+    "git_dirty": true,
+    "hardware": {
+      "model": "Mac14,2",
+      "cpu": "Apple M2",
+      "cores": "8",
+      "memory_bytes": "8589934592",
+      "platform": "macOS-26.3.1-arm64-arm-64bit"
+    },
+    "python": "3.12.7"
+  }
+}
