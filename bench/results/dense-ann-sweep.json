@@ -17,7 +17,7 @@
         "p999_us": 19643.667,
         "max_us": 75546.167
       },
-      "memory_gb": 1.499021312
+      "memory_gb": 1.684518764
     },
     {
       "structure": "hnsw",
@@ -34,7 +34,7 @@
         "p999_us": 15580.792,
         "max_us": 117744.042
       },
-      "memory_gb": 1.499021312
+      "memory_gb": 1.684518764
     },
     {
       "structure": "hnsw",
@@ -51,7 +51,7 @@
         "p999_us": 31692.792,
         "max_us": 127644.333
       },
-      "memory_gb": 1.499021312
+      "memory_gb": 1.684518764
     },
     {
       "structure": "hnsw",
@@ -68,7 +68,7 @@
         "p999_us": 46031.708,
         "max_us": 192616.792
       },
-      "memory_gb": 1.499021312
+      "memory_gb": 1.684518764
     },
     {
       "structure": "hnsw",
@@ -85,7 +85,7 @@
         "p999_us": 67430.166,
         "max_us": 153027.666
       },
-      "memory_gb": 1.499021312
+      "memory_gb": 1.684518764
     },
     {
       "structure": "hnsw",
@@ -102,7 +102,7 @@
         "p999_us": 25850.292,
         "max_us": 54596.25
       },
-      "memory_gb": 0.09042329599999999
+      "memory_gb": 1.81224416
     },
     {
       "structure": "hnsw",
@@ -119,7 +119,7 @@
         "p999_us": 15390.334,
         "max_us": 25050.0
       },
-      "memory_gb": 0.09042329599999999
+      "memory_gb": 1.81224416
     },
     {
       "structure": "hnsw",
@@ -136,7 +136,7 @@
         "p999_us": 34119.292,
         "max_us": 81787.75
       },
-      "memory_gb": 0.09042329599999999
+      "memory_gb": 1.81224416
     },
     {
       "structure": "hnsw",
@@ -153,7 +153,7 @@
         "p999_us": 57282.958,
         "max_us": 114872.916
       },
-      "memory_gb": 0.09042329599999999
+      "memory_gb": 1.81224416
     },
     {
       "structure": "hnsw",
@@ -170,7 +170,7 @@
         "p999_us": 88399.333,
         "max_us": 181325.75
       },
-      "memory_gb": 0.09042329599999999
+      "memory_gb": 1.81224416
     },
     {
       "structure": "hnsw",
@@ -187,7 +187,7 @@
         "p999_us": 119564.917,
         "max_us": 346826.584
       },
-      "memory_gb": 0.2396487679999999
+      "memory_gb": 2.068113556
     },
     {
       "structure": "hnsw",
@@ -204,7 +204,7 @@
         "p999_us": 44233.542,
         "max_us": 92974.583
       },
-      "memory_gb": 0.2396487679999999
+      "memory_gb": 2.068113556
     },
     {
       "structure": "hnsw",
@@ -221,7 +221,7 @@
         "p999_us": 30168.625,
         "max_us": 118491.375
       },
-      "memory_gb": 0.2396487679999999
+      "memory_gb": 2.068113556
     },
     {
       "structure": "hnsw",
@@ -238,7 +238,7 @@
         "p999_us": 50719.209,
         "max_us": 97728.75
       },
-      "memory_gb": 0.2396487679999999
+      "memory_gb": 2.068113556
     },
     {
       "structure": "hnsw",
@@ -255,7 +255,7 @@
         "p999_us": 123483.875,
         "max_us": 163964.125
       },
-      "memory_gb": 0.2396487679999999
+      "memory_gb": 2.068113556
     },
     {
       "structure": "ivfpq",
@@ -273,7 +273,7 @@
         "p999_us": 272.083,
         "max_us": 893.708
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.041974452
     },
     {
       "structure": "ivfpq",
@@ -291,7 +291,7 @@
         "p999_us": 251.583,
         "max_us": 704.667
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.041974452
     },
     {
       "structure": "ivfpq",
@@ -309,7 +309,7 @@
         "p999_us": 374.25,
         "max_us": 576.458
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.041974452
     },
     {
       "structure": "ivfpq",
@@ -327,7 +327,7 @@
         "p999_us": 478.125,
         "max_us": 514.083
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.041974452
     },
     {
       "structure": "ivfpq",
@@ -345,7 +345,7 @@
         "p999_us": 1828.417,
         "max_us": 2852.208
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.041974452
     },
     {
       "structure": "ivfpq",
@@ -363,7 +363,7 @@
         "p999_us": 185.125,
         "max_us": 275.084
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.073974452
     },
     {
       "structure": "ivfpq",
@@ -381,7 +381,7 @@
         "p999_us": 543.167,
         "max_us": 953.959
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.073974452
     },
     {
       "structure": "ivfpq",
@@ -399,7 +399,7 @@
         "p999_us": 521.583,
         "max_us": 1038.833
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.073974452
     },
     {
       "structure": "ivfpq",
@@ -417,7 +417,7 @@
         "p999_us": 1710.25,
         "max_us": 3317.042
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.073974452
     },
     {
       "structure": "ivfpq",
@@ -435,7 +435,7 @@
         "p999_us": 1888.75,
         "max_us": 2471.083
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.073974452
     },
     {
       "structure": "ivfpq",
@@ -453,7 +453,7 @@
         "p999_us": 244.042,
         "max_us": 539.834
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.04671762
     },
     {
       "structure": "ivfpq",
@@ -471,7 +471,7 @@
         "p999_us": 354.958,
         "max_us": 531.333
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.04671762
     },
     {
       "structure": "ivfpq",
@@ -489,7 +489,7 @@
         "p999_us": 363.709,
         "max_us": 589.292
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.04671762
     },
     {
       "structure": "ivfpq",
@@ -507,7 +507,7 @@
         "p999_us": 335.334,
         "max_us": 501.333
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.04671762
     },
     {
       "structure": "ivfpq",
@@ -525,7 +525,7 @@
         "p999_us": 697.5,
         "max_us": 1056.834
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.04671762
     },
     {
       "structure": "ivfpq",
@@ -543,7 +543,7 @@
         "p999_us": 359.375,
         "max_us": 521.708
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.07871762
     },
     {
       "structure": "ivfpq",
@@ -561,7 +561,7 @@
         "p999_us": 424.0,
         "max_us": 537.958
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.07871762
     },
     {
       "structure": "ivfpq",
@@ -579,7 +579,7 @@
         "p999_us": 368.833,
         "max_us": 642.541
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.07871762
     },
     {
       "structure": "ivfpq",
@@ -597,7 +597,7 @@
         "p999_us": 766.833,
         "max_us": 1997.167
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.07871762
     },
     {
       "structure": "ivfpq",
@@ -615,7 +615,7 @@
         "p999_us": 678.334,
         "max_us": 1913.709
       },
-      "memory_gb": 0.0
+      "memory_gb": 0.07871762
     }
   ],
   "provenance": {
@@ -630,5 +630,22 @@
       "platform": "macOS-26.3.1-arm64-arm-64bit"
     },
     "python": "3.12.7"
+  },
+  "memory_measurement": {
+    "method": "serialized index size (hnswlib save_index file size for HNSW; len(faiss.serialize_index(...)) for IVF-PQ) -- NOT an RSS delta; see task-5 report for why RSS (both ru_maxrss and live RSS) proved unusable on this host",
+    "ivfpq_bracket": "size of the trained+added index (excludes train()'s transient k-means scratch, which serialize_index never touches)",
+    "provenance": {
+      "timestamp_utc": "2026-08-20T15:08:43.508153+00:00",
+      "git_sha": "d6f3b15dbde83b9a73917c0b97f1ad2ca7d836e6",
+      "git_dirty": true,
+      "hardware": {
+        "model": "Mac14,2",
+        "cpu": "Apple M2",
+        "cores": "8",
+        "memory_bytes": "8589934592",
+        "platform": "macOS-26.3.1-arm64-arm-64bit"
+      },
+      "python": "3.12.7"
+    }
   }
 }
