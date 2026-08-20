@@ -12,12 +12,12 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from dense.subset import SEED as SUBSET_SEED
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_DIR = REPO_ROOT / "bench" / "results"
 PLOTS_DIR = REPO_ROOT / "bench" / "plots"
 BENCH_DIR = REPO_ROOT / "bench"
-
-SUBSET_SIZE = 1_000_000
 
 
 def render_pareto_plot(sweep: dict, output_path: Path) -> None:
@@ -30,7 +30,7 @@ def render_pareto_plot(sweep: dict, output_path: Path) -> None:
         ax.scatter(recalls, p99_ms, s=sizes, alpha=0.6, color=color, label=label)
     ax.set_xlabel("recall@100 (vs. exact brute-force)")
     ax.set_ylabel("p99 latency (ms)")
-    ax.set_title(f"HNSW vs IVF-PQ: recall/latency/memory ({SUBSET_SIZE:,}-passage subset)")
+    ax.set_title(f"HNSW vs IVF-PQ: recall/latency/memory ({sweep['subset_size']:,}-passage subset)")
     ax.legend()
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
@@ -97,6 +97,7 @@ dev queries (recall@100 / latency) and dl19+dl20 (fusion table).
 
 ## Configuration
 
+- subset seed: {SUBSET_SEED}
 - git SHA: `{provenance['git_sha']}`
 - hardware: {provenance['hardware']['cpu']}, {int(int(provenance['hardware']['memory_bytes']) / 1e9)}GB RAM
 - timestamp: {provenance['timestamp_utc']}
