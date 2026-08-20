@@ -65,6 +65,7 @@ dev queries (recall@100 / latency) and dl19+dl20 (fusion table).
 
 ## Configuration
 
+- subset seed: 0
 - git SHA: `009e697299cc3fedf1a929b681416e7db1543537`
 - hardware: Apple M2, 8GB RAM
 - timestamp: 2026-08-20T12:17:46.406014+00:00
