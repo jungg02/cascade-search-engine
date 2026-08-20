@@ -13,7 +13,7 @@ Full design: [`CASCADE_SEARCH_PLAN.md`](CASCADE_SEARCH_PLAN.md).
 | 0 — Harness | `bench/baselines.md` | **done** |
 | 1 — C++ index + BlockMax-WAND | `bench/phase1.md` | **done** |
 | 2 — Serving, sharding, tail latency | capacity statement | sub-project A done |
-| 3 — Dense recall | ANN Pareto frontier | not started |
+| 3 — Dense recall | ANN Pareto frontier | **done** |
 | 4 — Ranking cascade | batching + precision tables | not started |
 | 5 — Video, multi-field | field ablations | not started |
 | 6 — Near-real-time indexing | freshness/latency tradeoff | not started |
@@ -108,6 +108,35 @@ uv run python -m server.report           # -> bench/phase2a.md
 The server itself (`cpp/build/server_bin <index_dir> [--port=P] [--workers=N]
 [--queue-depth=D] [--cache-capacity=C] [--algorithm=wand|blockmax-wand|daat-or]`)
 can also be run standalone for manual testing.
+
+## Running Phase 3 (dense recall and the ANN Pareto frontier)
+
+Needs the `dense` extra (`sentence-transformers`, `torch`, `faiss-cpu`,
+`hnswlib`, `matplotlib`) and Phase 1's WAND run files for dl19/dl20
+(`uv run python -m baselines.cascade_bm25` if not already present).
+`hnswlib` has no macOS wheel and needs the SDK's libc++ headers pointed at
+explicitly to build from source:
+
+```bash
+SDK_PATH=$(xcrun --show-sdk-path)
+CXXFLAGS="-isystem $SDK_PATH/usr/include/c++/v1" \
+CPPFLAGS="-isystem $SDK_PATH/usr/include/c++/v1" \
+uv sync --extra dense
+```
+
+```bash
+export PYTHONPATH=py
+uv run python -m dense.subset          # 1M-passage qrels-preserving subset
+uv run python -m dense.encode          # bge-small-en-v1.5 encoding, ~60 min
+uv run python -m dense.ground_truth    # exact brute-force top-k -> bench/results/dense-ground-truth-*.json
+uv run python -m dense.ann_sweep       # HNSW + IVF-PQ sweep -> bench/results/dense-ann-sweep.json
+uv run python -m dense.fusion          # RRF / score fusion -> bench/results/dense-fusion.json
+uv run python -m dense.report          # -> bench/phase3.md, bench/plots/phase3-pareto.png
+```
+
+This machine has 8GB RAM and no GPU, so this phase subsets to 1M passages
+rather than the full 8.8M-passage corpus — see `bench/phase3.md`'s own
+opening section for why.
 
 ## Ground rules
 
