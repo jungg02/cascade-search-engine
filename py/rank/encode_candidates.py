@@ -49,7 +49,7 @@ def truncate_to_top_k(run: dict[str, dict[str, float]], k: int) -> dict[str, dic
     identically to dev_run before sampling training negatives, so the
     encoded feature set and the training-sampling pool always agree."""
     return {
-        qid: dict(sorted(candidates.items(), key=lambda kv: kv[1], reverse=True)[:k])
+        qid: dict(sorted(candidates.items(), key=lambda kv: (kv[1], kv[0]), reverse=True)[:k])
         for qid, candidates in run.items()
     }
 
