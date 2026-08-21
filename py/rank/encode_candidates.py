@@ -2,9 +2,14 @@
 
 Not a re-run of dense.encode.py -- that encoded Phase 3's 1M-passage
 *subset*; this phase's WAND candidates are a different, much smaller
-document set (the union of every doc across the three WAND runs' depth-1000
-lists). Encodes just that set, plus the dev/dl19/dl20 queries, and writes a
-flat scalar feature file -- Kaggle only needs the (qid, docid) -> dense_score
+document set. dl19/dl20 stay at their full depth-1000 (every candidate there
+is genuinely scored, for prerank-consistency's true-top-k). dev is truncated
+to each query's top DEV_NEGATIVE_POOL_DEPTH WAND-scored candidates before
+encoding -- dev's *un*truncated union across 6,980 queries is 3.77M unique
+docs (measured; an 8+ hour encoding job), when MLP training only ever
+samples 1 positive + 4 negatives per query from it. Encodes just that
+truncated/full-depth set, plus the dev/dl19/dl20 queries, and writes a flat
+scalar feature file -- Kaggle only needs the (qid, docid) -> dense_score
 scalar as an MLP feature, not the raw embeddings, so nothing here ships a
 1.5GB-scale artifact the way Phase 3's encode.py did.
 """
@@ -26,6 +31,7 @@ DATA_DIR = REPO_ROOT / "data"
 RUNS_DIR = REPO_ROOT / "runs"
 
 QUERY_SETS = ("dev", "dl19", "dl20")
+DEV_NEGATIVE_POOL_DEPTH = 50
 
 
 def unique_candidate_docids(runs: list[dict[str, dict[str, float]]]) -> set[str]:
@@ -35,6 +41,17 @@ def unique_candidate_docids(runs: list[dict[str, dict[str, float]]]) -> set[str]
         for candidates in run.values():
             docids.update(candidates)
     return docids
+
+
+def truncate_to_top_k(run: dict[str, dict[str, float]], k: int) -> dict[str, dict[str, float]]:
+    """Keep only each query's k highest-scoring candidates. Used to bound
+    dev's contribution to the encoding workload -- Task 6/Task 8 apply this
+    identically to dev_run before sampling training negatives, so the
+    encoded feature set and the training-sampling pool always agree."""
+    return {
+        qid: dict(sorted(candidates.items(), key=lambda kv: kv[1], reverse=True)[:k])
+        for qid, candidates in run.items()
+    }
 
 
 def load_wand_runs() -> dict[str, dict[str, dict[str, float]]]:
@@ -64,8 +81,12 @@ def collect_candidate_texts(candidate_docids: set[str]) -> dict[str, str]:
 
 def main() -> None:
     wand_runs = load_wand_runs()
+    wand_runs["dev"] = truncate_to_top_k(wand_runs["dev"], DEV_NEGATIVE_POOL_DEPTH)
     candidate_docids = unique_candidate_docids(list(wand_runs.values()))
-    print(f"unique candidate docids across dev+dl19+dl20: {len(candidate_docids)}")
+    print(
+        f"unique candidate docids across dev (top {DEV_NEGATIVE_POOL_DEPTH}/query)"
+        f"+dl19+dl20: {len(candidate_docids)}"
+    )
 
     device = select_device()
     print(f"device: {device}")
