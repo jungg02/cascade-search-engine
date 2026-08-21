@@ -23,6 +23,7 @@ Full design: [`CASCADE_SEARCH_PLAN.md`](CASCADE_SEARCH_PLAN.md).
 ```
 py/harness/     metrics, open-loop load generation, latency recording, run files
 py/baselines/   Lucene (Anserini) and Tantivy BM25 baselines, cascade C++ index driver
+py/dense/       dense encoding, ANN sweep (HNSW/IVF-PQ), hybrid fusion
 py/tests/       pytest suite
 cpp/index/      analyzer, Porter stemmer, postings codec, index builder
 cpp/query/      DAAT-OR, WAND, BlockMax-WAND over a shared cursor
@@ -31,7 +32,7 @@ cpp/tests/      correctness: BMW/WAND top-k == exhaustive top-k, on a synthetic 
 cpp/server/     gRPC service: bounded queue + worker pool + LRU cache
 py/server/      server client, process manager, throughput/cache experiments
 bench/results/  raw JSON per run — committed
-bench/          baselines.md, phase1.md, phase2a.md, plots, REPORT.md
+bench/          baselines.md, phase1.md, phase2a.md, phase3.md, plots, REPORT.md
 .tools/         JDK 21 and the Anserini fatjar (gitignored)
 data/ indexes/ runs/   corpora, built indexes, and run files (gitignored)
 ```
@@ -43,7 +44,7 @@ pybind11's headers, which come from the venv.
 
 ```bash
 uv sync --extra dev --extra baselines
-uv run pytest                      # 50 tests, no corpus needed
+uv run pytest                      # 62 tests, no corpus needed
 ```
 
 The baselines additionally need an arm64 JDK 21 and the Anserini fatjar in

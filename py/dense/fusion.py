@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from harness.datasets import load_qrels
+from harness.datasets import load_qrels, rel_threshold
 from harness.metrics import evaluate
 from harness.runfile import read_run
 from harness.runmeta import run_metadata
@@ -92,6 +92,17 @@ def fuse_run(
 
 
 def main() -> None:
+    # Both query sets pooled into a single evaluate() call, which takes one
+    # rel_threshold for the whole run -- assert they actually agree instead of
+    # silently picking one, so this breaks loudly if a future query set with a
+    # different threshold is ever added to QUERY_SETS.
+    thresholds = {rel_threshold(query_set) for query_set in QUERY_SETS}
+    assert len(thresholds) == 1, (
+        f"pooled evaluate() takes a single rel_threshold; got {thresholds} "
+        f"across {QUERY_SETS}"
+    )
+    threshold = thresholds.pop()
+
     all_qrels: dict[str, dict[str, int]] = {}
     lexical_run: dict[str, dict[str, float]] = {}
     dense_run: dict[str, dict[str, float]] = {}
@@ -109,11 +120,20 @@ def main() -> None:
 
     results = {}
     for name, run in rows.items():
-        eval_result = evaluate(all_qrels, run, ndcg_k=(10,), recall_k=(1000,))
+        eval_result = evaluate(
+            all_qrels, run, ndcg_k=(10,), recall_k=(1000,), rel_threshold=threshold
+        )
+        # run_depth/shallow_metrics are per-row, not per-file: lexical_only and
+        # dense_only are each a single 1000-deep run, but rrf/score_fusion fuse
+        # the union of both channels' docids per query, so their run_depth can
+        # run past 1000. Copying a single top-level run_depth (Phase 1's shape,
+        # one run per file) would be wrong for the fused rows.
         results[name] = {
             "ndcg_10": eval_result.mean["ndcg_cut_10"],
             "recall_1000": eval_result.mean["recall_1000"],
             "num_queries": eval_result.num_queries,
+            "run_depth": eval_result.run_depth,
+            "shallow_metrics": eval_result.shallow_metrics,
         }
         print(
             f"{name:>14}: ndcg@10={results[name]['ndcg_10']:.4f} "
@@ -123,6 +143,7 @@ def main() -> None:
     output = {
         "query_sets": list(QUERY_SETS),
         "rrf_k": RRF_K,
+        "rel_threshold": threshold,
         "results": results,
         "provenance": run_metadata(),
     }
