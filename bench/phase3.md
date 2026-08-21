@@ -7,7 +7,12 @@ This machine has 8GB RAM and no GPU. The full 8.8M-passage corpus would need
 subsets to **1,000,000 passages**: every document judged in the
 dl19+dl20 qrels, plus a seeded random fill. The Pareto-frontier finding (which
 ANN structure wins at which recall target) does not depend on corpus size;
-only the absolute latency/memory numbers would shift at 8.8M.
+only the absolute latency/memory numbers would shift at 8.8M. This does *not*
+extend to the fusion table below: there, the lexical channel searches the
+full 8.8M-passage corpus (Phase 1's WAND run) while the dense channel only
+searches this 1M-passage subset, so `dense_only` vs. `lexical_only` NDCG@10 is
+not a like-for-like comparison of the two retrieval methods -- it's partly an
+artifact of the dense channel's much smaller, guaranteed-relevant-doc haystack.
 
 Encoder: `BAAI/bge-small-en-v1.5`. Evaluated over 6980
 dev queries (recall@100 / latency) and dl19+dl20 (fusion table).
@@ -54,18 +59,34 @@ dev queries (recall@100 / latency) and dl19+dl20 (fusion table).
 | ivfpq | nlist=1024 m=32 nprobe=1 | 0.3126 | 0.09 | 0.13 | 0.042 |
 | ivfpq | nlist=4096 m=32 nprobe=1 | 0.3003 | 0.17 | 0.20 | 0.047 |
 
+HNSW's efSearch=32 and efSearch=64 rows show byte-identical recall@100 at
+every M: hnswlib internally clamps effective ef to at least k (100), so both
+nominal values run the same effective search. The p99 latency differences
+between those two rows are measurement noise, not signal.
+
 ## Hybrid fusion (dl19+dl20)
 
 | channel | NDCG@10 | recall@1000 |
 |---|---|---|
-| lexical_only | 0.4903 | 0.7308 |
-| dense_only | 0.7167 | 0.8720 |
-| rrf | 0.6414 | 0.8927 |
-| score_fusion | 0.6577 | 0.8925 |
+| lexical_only | 0.4903 | 0.7716 |
+| dense_only | 0.7167 | 0.9070 |
+| rrf | 0.6414 | 0.9245 |
+| score_fusion | 0.6577 | 0.9216 |
+
+Equal-weight RRF and score fusion both land between `lexical_only` and
+`dense_only` on NDCG@10 -- below `dense_only`, since fusion dilutes the
+stronger (but corpus-asymmetric, see above) dense channel with the weaker
+lexical one -- while gaining a bit over both on recall@1000, since fusing
+unions two largely disjoint document sets, which mechanically raises recall
+regardless of ranking quality.
 
 ## Configuration
 
 - subset seed: 0
+- device: mps
 - git SHA: `009e697299cc3fedf1a929b681416e7db1543537`
 - hardware: Apple M2, 8GB RAM
 - timestamp: 2026-08-20T12:17:46.406014+00:00
+- note: the sweep, fusion, and memory-remeasurement runs that produced this
+  report's data were all against a dirty working tree (`git_dirty: true` in
+  each result JSON's own provenance block)

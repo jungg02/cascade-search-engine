@@ -12,6 +12,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from dense.encode import MEASURED_DEVICE
 from dense.subset import SEED as SUBSET_SEED
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -27,12 +28,26 @@ def render_pareto_plot(sweep: dict, output_path: Path) -> None:
         recalls = [p["recall_at_100"] for p in points]
         p99_ms = [p["latency_us"]["p99_us"] / 1000 for p in points]
         sizes = [max(20.0, p["memory_gb"] * 400) for p in points]
-        ax.scatter(recalls, p99_ms, s=sizes, alpha=0.6, color=color, label=label)
+        ax.scatter(
+            recalls, p99_ms, s=sizes, alpha=0.5, color=color, label=label,
+            edgecolors="black", linewidths=0.5,
+        )
     ax.set_xlabel("recall@100 (vs. exact brute-force)")
-    ax.set_ylabel("p99 latency (ms)")
+    ax.set_ylabel("p99 latency (ms, log scale)")
+    # Linear y collapsed all 20 IVF-PQ points (p99 0.13-1.38ms) to ~0 next to
+    # HNSW's 5-65ms range, hiding the IVF-PQ latency story entirely.
+    ax.set_yscale("log")
     ax.set_title(f"HNSW vs IVF-PQ: recall/latency/memory ({sweep['subset_size']:,}-passage subset)")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
+    structure_legend = ax.legend(loc="upper left", title="structure")
+    ax.add_artist(structure_legend)
+    size_handles = [
+        ax.scatter([], [], s=20.0, color="gray", alpha=0.5, edgecolors="black",
+                   linewidths=0.5, label="small index"),
+        ax.scatter([], [], s=400.0, color="gray", alpha=0.5, edgecolors="black",
+                   linewidths=0.5, label="large index"),
+    ]
+    ax.legend(handles=size_handles, loc="lower right", title="memory (marker size)", framealpha=0.9)
+    ax.grid(True, alpha=0.3, which="both")
     fig.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=150)
@@ -80,7 +95,12 @@ This machine has 8GB RAM and no GPU. The full 8.8M-passage corpus would need
 subsets to **{sweep['subset_size']:,} passages**: every document judged in the
 dl19+dl20 qrels, plus a seeded random fill. The Pareto-frontier finding (which
 ANN structure wins at which recall target) does not depend on corpus size;
-only the absolute latency/memory numbers would shift at 8.8M.
+only the absolute latency/memory numbers would shift at 8.8M. This does *not*
+extend to the fusion table below: there, the lexical channel searches the
+full 8.8M-passage corpus (Phase 1's WAND run) while the dense channel only
+searches this 1M-passage subset, so `dense_only` vs. `lexical_only` NDCG@10 is
+not a like-for-like comparison of the two retrieval methods -- it's partly an
+artifact of the dense channel's much smaller, guaranteed-relevant-doc haystack.
 
 Encoder: `BAAI/bge-small-en-v1.5`. Evaluated over {sweep['num_dev_queries']}
 dev queries (recall@100 / latency) and dl19+dl20 (fusion table).
@@ -91,16 +111,32 @@ dev queries (recall@100 / latency) and dl19+dl20 (fusion table).
 
 {render_sweep_table(sweep)}
 
+HNSW's efSearch=32 and efSearch=64 rows show byte-identical recall@100 at
+every M: hnswlib internally clamps effective ef to at least k (100), so both
+nominal values run the same effective search. The p99 latency differences
+between those two rows are measurement noise, not signal.
+
 ## Hybrid fusion (dl19+dl20)
 
 {render_fusion_table(fusion)}
 
+Equal-weight RRF and score fusion both land between `lexical_only` and
+`dense_only` on NDCG@10 -- below `dense_only`, since fusion dilutes the
+stronger (but corpus-asymmetric, see above) dense channel with the weaker
+lexical one -- while gaining a bit over both on recall@1000, since fusing
+unions two largely disjoint document sets, which mechanically raises recall
+regardless of ranking quality.
+
 ## Configuration
 
 - subset seed: {SUBSET_SEED}
+- device: {MEASURED_DEVICE}
 - git SHA: `{provenance['git_sha']}`
 - hardware: {provenance['hardware']['cpu']}, {int(int(provenance['hardware']['memory_bytes']) / 1e9)}GB RAM
 - timestamp: {provenance['timestamp_utc']}
+- note: the sweep, fusion, and memory-remeasurement runs that produced this
+  report's data were all against a dirty working tree (`git_dirty: true` in
+  each result JSON's own provenance block)
 """
 
 

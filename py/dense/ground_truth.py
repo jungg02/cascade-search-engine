@@ -2,11 +2,11 @@
 via faiss.IndexFlatIP. Two outputs, two purposes:
 
   - dev query set (6,980 queries): the recall@100 reference and latency
-    source for the ANN sweep (dense_recall/ann_sweep.py). Top-100 only --
+    source for the ANN sweep (dense/ann_sweep.py). Top-100 only --
     recall@100 needs no more, and dev's query count makes top-1000 an
     unreasonably large commit (~140MB vs ~14MB at top-100).
   - dl19+dl20 query set (97 queries): the exact dense channel for hybrid
-    fusion (dense_recall/fusion.py), which needs recall@1000. Using the
+    fusion (dense/fusion.py), which needs recall@1000. Using the
     *exact* ranking here (not an ANN approximation) isolates "does fusion
     help" from "how good is the ANN approximation" -- a separate question
     the Pareto sweep already answers.
@@ -65,6 +65,11 @@ def main() -> None:
     embeddings = np.load(DATA_DIR / "dense-embeddings.npy")
     docids = np.load(DATA_DIR / "dense-docids.npy")
     assert embeddings.shape[0] == SUBSET_SIZE
+    assert docids.shape[0] == embeddings.shape[0], (
+        "dense-embeddings.npy and dense-docids.npy are out of sync -- encode.py "
+        "writes them in two separate steps, so a crash between those writes "
+        "would otherwise go undetected here"
+    )
     index = build_flat_index(embeddings)
 
     dev_results = run_query_set(index, docids, "dev", k=100)

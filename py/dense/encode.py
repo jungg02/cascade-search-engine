@@ -43,6 +43,14 @@ BATCH_SIZE = 32
 CHUNK_SIZE = 50_000
 QUERY_SETS = ("dev", "dl19", "dl20")
 
+# select_device() detects whatever this *host* has at call time -- fine for
+# actually running encode.py, wrong for a report reading it later, since the
+# report needs to say what device produced the *committed* embeddings, not
+# what's available on whatever machine happens to render the report. This is
+# a recorded literal, not a re-detection: this repo's only real encoding run
+# (see the SDD ledger's Task 3 notes) used MPS.
+MEASURED_DEVICE = "mps"
+
 
 def apply_query_prefix(text: str) -> str:
     return QUERY_PREFIX + text

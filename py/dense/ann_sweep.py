@@ -7,11 +7,23 @@ Latency is measured single-threaded, one search() call per dev query
 use one thread per call so their own internal multithreading doesn't
 blur a single-query measurement.
 
-Memory footprint is a getrusage RSS delta around each build call.
-Platform-specific: ru_maxrss is *bytes* on macOS (this project's only
-target platform), *kilobytes* on Linux -- verified empirically at
-plan-writing time. Divide by 1e9 for GB; do not port this constant
-elsewhere without re-checking.
+Memory footprint, as implemented below (current_rss_gb, a getrusage RSS
+delta around each build call), describes this script's *original*
+methodology only. It has a known same-process high-water-mark flaw: running
+all seven builds (3 HNSW + 4 IVF-PQ) sequentially in one process means only
+the first heavy allocation produces a meaningful delta -- every later
+build's "before" baseline already sits at or above its own peak, so its
+delta reads near-zero (this is exactly what happened: 30/35 points read
+memory_gb=0.0 or non-monotonic on the real run). The `memory_gb` values
+actually committed in bench/results/dense-ann-sweep.json were NOT produced
+by rerunning this script -- they came from a separate one-off remeasurement
+that switched to serialized-index-size (hnswlib save_index / faiss
+serialize_index byte length), which is deterministic and immune to this
+bug. See that JSON's own top-level `memory_measurement` field for the real
+method and provenance. Platform note (still true of the RSS path below):
+ru_maxrss is *bytes* on macOS (this project's only target platform),
+*kilobytes* on Linux -- verified empirically at plan-writing time. Divide
+by 1e9 for GB; do not port this constant elsewhere without re-checking.
 """
 
 from __future__ import annotations
@@ -46,7 +58,15 @@ faiss.omp_set_num_threads(1)
 
 
 def current_rss_gb() -> float:
-    """macOS: ru_maxrss is bytes. See module docstring."""
+    """macOS: ru_maxrss is bytes. See module docstring.
+
+    Known bug (see module docstring): same-process high-water-mark RSS makes
+    every build after the first read a near-zero delta. Rerunning this script
+    will NOT reproduce the memory_gb values currently committed in
+    bench/results/dense-ann-sweep.json -- those came from a separate
+    serialized-index-size remeasurement (see that JSON's memory_measurement
+    field), not from this function.
+    """
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e9
 
 
