@@ -3,7 +3,7 @@ run dicts rather than the real WAND run files."""
 
 from __future__ import annotations
 
-from rank.encode_candidates import unique_candidate_docids
+from rank.encode_candidates import truncate_to_top_k, unique_candidate_docids
 
 
 def test_union_across_multiple_runs():
@@ -20,3 +20,15 @@ def test_empty_runs_list_is_empty_set():
 def test_single_run_single_query():
     run_a = {"q1": {"d1": 1.0}}
     assert unique_candidate_docids([run_a]) == {"d1"}
+
+
+def test_truncate_to_top_k_keeps_highest_scores():
+    run = {"q1": {"d1": 1.0, "d2": 5.0, "d3": 3.0, "d4": 2.0}}
+    result = truncate_to_top_k(run, k=2)
+    assert result == {"q1": {"d2": 5.0, "d3": 3.0}}
+
+
+def test_truncate_to_top_k_leaves_short_queries_unchanged():
+    run = {"q1": {"d1": 1.0}}
+    result = truncate_to_top_k(run, k=5)
+    assert result == {"q1": {"d1": 1.0}}
