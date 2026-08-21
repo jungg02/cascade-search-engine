@@ -38,9 +38,20 @@ dense = [
     "torch>=2.13.0",
 ]
 
+# CPU-only versions of everything ONNX-related, for local smoke tests and for
+# sharing code with the Kaggle driver (which additionally installs
+# onnxruntime-gpu there -- see kaggle/README.md). torch is already present via
+# the `dense` extra.
+rank = [
+    "transformers>=4.46.0",
+    "onnx>=1.17.0",
+    "onnxruntime>=1.20.0",
+    "onnxconverter-common>=1.14.0",
+]
+
 [tool.uv]
 package = false
 
 [tool.pytest.ini_options]
-testpaths = ["py/tests", "py/server/tests", "py/dense/tests"]
+testpaths = ["py/tests", "py/server/tests", "py/dense/tests", "py/rank/tests"]
 pythonpath = ["py"]
