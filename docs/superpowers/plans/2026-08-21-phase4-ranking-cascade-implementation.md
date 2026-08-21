@@ -763,8 +763,8 @@ def test_train_and_score_tiny_synthetic_dataset():
     features = [(1.0, 1.0, 1.0), (1.0, 1.0, 1.0), (-1.0, -1.0, -1.0), (-1.0, -1.0, -1.0)]
     labels = [1.0, 1.0, 0.0, 0.0]
     scaler = fit_scaler(features)
+    torch.manual_seed(0)  # before build_mlp(): seeds weight init, not just training
     model = build_mlp()
-    torch.manual_seed(0)
     train_mlp(model, features, labels, scaler, epochs=200)
 
     query_features = {"pos_doc": (1.0, 1.0, 1.0), "neg_doc": (-1.0, -1.0, -1.0)}
