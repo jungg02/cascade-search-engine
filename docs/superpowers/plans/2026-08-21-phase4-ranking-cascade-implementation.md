@@ -13,13 +13,13 @@
 ## Global Constraints
 
 - **No local GPU; Kaggle Notebook (T4) for all GPU-bound work.** This session cannot execute code on Kaggle — the user runs `kaggle/phase4_driver.py` there themselves and downloads `bench/results/rank-*.json` back into the repo. Every GPU-bound task in this plan therefore has two levels: a full-scale Kaggle run (real numbers, not reproducible locally) and a tiny local smoke test (a handful of synthetic or real-but-small examples, CPU-only, using the *real* model at tiny scale) that catches code bugs before they cost a Kaggle session. This mirrors Phase 3's `--limit` smoke-test pattern for its own expensive encode step.
-- **Candidate pool: Phase 1's existing WAND runs, unmodified.** `runs/cascade-wand.{dev,dl19,dl20}.txt` (depth 1000, already on disk, `harness.runfile.read_run`) — no re-query of the C++ index, no fusion with Phase 3's dense channel. Verified at plan-writing time: `cascade-wand.dev.txt` has 6,974,879 lines (≈1000/query across 6,980 queries — some queries have slightly fewer than 1000 hits), `cascade-wand.dl19.txt`/`dl20.txt` are depth 1000 for 43/54 queries respectively (per `runs/manifest.json`'s `hits: 1000` field on each `cascade-wand` entry).
+- **Candidate pool: Phase 1's existing WAND runs, unmodified.** `runs/cascade-wand.{dev,dl19,dl20}.txt` (depth 1000, already on disk, `harness.runfile.read_run`) — no re-query of the C++ index, no fusion with Phase 3's dense channel. Verified at plan-writing time: `cascade-wand.dev.txt` has 6,974,879 lines (≈1000/query across 6,980 queries — some queries have slightly fewer than 1000 hits), `cascade-wand.dl19.txt`/`dl20.txt` are depth 1000 for 43/54 queries respectively (per `runs/manifest.json`'s `hits: 1000` field on each `cascade-wand` entry). This "unmodified" promise holds for every candidate pool that is actually *scored and reported* (dl19/dl20's full depth-1000, used everywhere — prerank-consistency's true-top-k, cascade NDCG@10, batching/precision/queue harnesses). It does **not** extend to dev's role as MLP *training-data source*: see the negative-sampling bullet below for a real scale correction found during Task 2's implementation (dev's union of depth-1000-per-query candidates is 3.77M unique docs, not the "tens of thousands" this plan originally estimated — an 8+ hour encoding job at this project's established `batch_size=32` MPS rate).
 - **Relevance data:** dev qrels are sparse binary (verified: `harness.datasets.load_qrels("dev")` returns exactly one relevant docid per query in the sampled cases at plan-writing time — MS MARCO dev's standard shape), used only for MLP *training* (never for reporting NDCG/recall, since dev's `rel_threshold` is 1, not the project's dl19/dl20 convention of 2). dl19+dl20 (97 queries total, graded relevance, `rel_threshold=2` via `harness.datasets.rel_threshold`) are the held-out eval set for every reported metric — MLP never sees them during training.
 - **Encoder reuse:** dense-score features use the exact same model/convention as Phase 3 — `BAAI/bge-small-en-v1.5` via `sentence-transformers`, L2-normalized, asymmetric query prefix. Task 2 imports `dense.encode.apply_query_prefix` and `dense.encode.select_device` directly rather than redefining them.
 - **Cross-encoder:** `cross-encoder/ms-marco-MiniLM-L-6-v2` (HuggingFace hub ID) via `transformers.AutoModelForSequenceClassification`/`AutoTokenizer` directly (not `sentence_transformers.CrossEncoder`) — direct `transformers` access is what ONNX export needs, and using the same access path for the fp32 baseline keeps every precision variant's code path identical except for the ONNX Runtime session's execution provider and quantization.
 - **Doc length feature:** character count of the candidate's passage text (`len(text)`) — not a token count, to avoid a second tokenizer dependency in the local, non-GPU encoding step.
 - **Feature scaling:** BM25 score, dense score, and doc length are on incompatible scales (BM25 unbounded, dense cosine in [-1, 1], doc length in the hundreds to thousands of characters). The MLP trains on z-score-normalized features (mean/std computed once on the **dev** training set, the same fixed values applied to dl19/dl20 at eval time — never recomputed on eval data, which would leak eval-set statistics into normalization).
-- **Negative sampling for MLP training:** dev's qrels give ~1 positive per query. Training pairs: the 1 labeled-relevant doc (label 1) plus 4 negatives (label 0) sampled uniformly at random, without replacement, from that query's other WAND candidates, seeded (`np.random.default_rng(0)`) for reproducibility — 5 training examples per dev query with a valid positive.
+- **Negative sampling for MLP training, and dev's encoding-scope correction (ruling, made during Task 2's implementation):** dev's qrels give ~1 positive per query. Training pairs: the 1 labeled-relevant doc (label 1) plus 4 negatives (label 0) sampled uniformly at random, without replacement, from that query's WAND candidates, seeded (`np.random.default_rng(0)`) for reproducibility — 5 training examples per dev query with a valid positive. **Correction:** the candidate pool negatives are sampled from is each query's **top 50** WAND-scored candidates (`rank.encode_candidates.truncate_to_top_k`, `DEV_NEGATIVE_POOL_DEPTH = 50`), not the full up-to-999 non-positive candidates as originally written. This was forced by a real scale finding: the union of dev's *un*truncated depth-1000 candidates across 6,980 queries is 3,767,002 unique docs — encoding dense-score features for all of them measured at ~7-8 hours (batch_size=32, ~128 docs/sec on this project's MPS setup), against this plan's original "tens of thousands, low tens of minutes" estimate. Truncating to top-50 bounds dev's contribution to at most 6,980 × 50 = 349,000 (docid, query) slots (most of the encoding work), bringing the job back to the originally-intended tens-of-minutes scale. This is also a better-justified training signal, not just a workaround: uniform sampling over up to 999 mostly-irrelevant tail candidates gives the MLP mostly "easy" negatives, whereas the top-50 BM25-ranked candidates are the ones actually competing with the positive for pre-rank survival — the harder, more informative negatives for this specific task. Cost if this ruling is wrong: some dev queries whose single qrels-positive falls outside BM25's top 50 (previously usable at depth 1000) are now skipped for training, modestly shrinking the effective training set; this does not affect dl19/dl20, which are never truncated and remain the full, unmodified depth-1000 eval candidate pool for every reported metric.
 - **ONNX quantization: dynamic, not static/calibration-based.** `onnxruntime.quantization.quantize_dynamic` needs no calibration dataset and is the simpler path (matching the design spec's explicit ONNX-over-TensorRT tradeoff) — INT8 activation ranges are computed at runtime, not pre-calibrated. This is a real, stated tradeoff (dynamic quantization can be less accurate than calibrated static quantization), not assumed to be free.
 - **fp16 conversion:** `onnxconverter_common.float16.convert_float_to_float16` on the exported fp32 ONNX graph — a separate `.onnx` file, not a runtime cast.
 - **INT8-on-GPU is a measured question, not an assumption.** ONNX Runtime's `CUDAExecutionProvider` may not accelerate every dynamically-quantized op — some can silently fall back to CPU. The harness measures and reports whatever latency actually results; a slower-than-expected INT8 number is a real finding to report, not a bug to hide or route around.
@@ -142,7 +142,7 @@ git commit -m "phase4: add ranking-cascade dependencies and package scaffolding"
 
 **Interfaces:**
 - Consumes: `runs/cascade-wand.{dev,dl19,dl20}.txt` (Phase 1, via `harness.runfile.read_run`), `harness.datasets.load_queries(query_set: str) -> dict[str, str]`, `harness.datasets.iter_docs(limit: int | None = None) -> Iterator[tuple[str, str]]`, `dense.encode.apply_query_prefix(text: str) -> str`, `dense.encode.select_device() -> str`.
-- Produces: `unique_candidate_docids(runs: list[dict[str, dict[str, float]]]) -> set[str]` (pure, unit-tested). CLI writes `data/rank-dense-scores.jsonl` — one JSON object per line, `{"qid": str, "docid": str, "dense_score": float, "doc_length": int}`, for every (query, candidate) pair across dev+dl19+dl20's WAND runs — and `data/rank-candidate-texts.json` — a flat `{docid: passage_text}` mapping for every unique candidate docid, so Task 8's Kaggle driver can build real cross-encoder input pairs without ever needing the full 8.8M-passage corpus there.
+- Produces: `unique_candidate_docids(runs: list[dict[str, dict[str, float]]]) -> set[str]` (pure, unit-tested) and `truncate_to_top_k(run: dict[str, dict[str, float]], k: int) -> dict[str, dict[str, float]]` (pure, unit-tested — keeps each query's k highest-scoring candidates; Task 6 and Task 8 import this too, applying it identically to `dev_run` before sampling training negatives, so the encoded feature set and the training-sampling pool always agree by construction). CLI writes `data/rank-dense-scores.jsonl` — one JSON object per line, `{"qid": str, "docid": str, "dense_score": float, "doc_length": int}`, for every (query, candidate) pair across dl19+dl20's full depth-1000 WAND runs plus dev's **top-50-per-query truncated** run (see Global Constraints' negative-sampling correction) — and `data/rank-candidate-texts.json` — a flat `{docid: passage_text}` mapping for every unique candidate docid retained after that truncation, so Task 8's Kaggle driver can build real cross-encoder input pairs without ever needing the full 8.8M-passage corpus there.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -154,7 +154,7 @@ run dicts rather than the real WAND run files."""
 
 from __future__ import annotations
 
-from rank.encode_candidates import unique_candidate_docids
+from rank.encode_candidates import truncate_to_top_k, unique_candidate_docids
 
 
 def test_union_across_multiple_runs():
@@ -171,6 +171,18 @@ def test_empty_runs_list_is_empty_set():
 def test_single_run_single_query():
     run_a = {"q1": {"d1": 1.0}}
     assert unique_candidate_docids([run_a]) == {"d1"}
+
+
+def test_truncate_to_top_k_keeps_highest_scores():
+    run = {"q1": {"d1": 1.0, "d2": 5.0, "d3": 3.0, "d4": 2.0}}
+    result = truncate_to_top_k(run, k=2)
+    assert result == {"q1": {"d2": 5.0, "d3": 3.0}}
+
+
+def test_truncate_to_top_k_leaves_short_queries_unchanged():
+    run = {"q1": {"d1": 1.0}}
+    result = truncate_to_top_k(run, k=5)
+    assert result == {"q1": {"d1": 1.0}}
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -185,9 +197,14 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'rank.encode_candidates
 
 Not a re-run of dense.encode.py -- that encoded Phase 3's 1M-passage
 *subset*; this phase's WAND candidates are a different, much smaller
-document set (the union of every doc across the three WAND runs' depth-1000
-lists). Encodes just that set, plus the dev/dl19/dl20 queries, and writes a
-flat scalar feature file -- Kaggle only needs the (qid, docid) -> dense_score
+document set. dl19/dl20 stay at their full depth-1000 (every candidate there
+is genuinely scored, for prerank-consistency's true-top-k). dev is truncated
+to each query's top DEV_NEGATIVE_POOL_DEPTH WAND-scored candidates before
+encoding -- dev's *un*truncated union across 6,980 queries is 3.77M unique
+docs (measured; an 8+ hour encoding job), when MLP training only ever
+samples 1 positive + 4 negatives per query from it. Encodes just that
+truncated/full-depth set, plus the dev/dl19/dl20 queries, and writes a flat
+scalar feature file -- Kaggle only needs the (qid, docid) -> dense_score
 scalar as an MLP feature, not the raw embeddings, so nothing here ships a
 1.5GB-scale artifact the way Phase 3's encode.py did.
 """
@@ -209,6 +226,7 @@ DATA_DIR = REPO_ROOT / "data"
 RUNS_DIR = REPO_ROOT / "runs"
 
 QUERY_SETS = ("dev", "dl19", "dl20")
+DEV_NEGATIVE_POOL_DEPTH = 50
 
 
 def unique_candidate_docids(runs: list[dict[str, dict[str, float]]]) -> set[str]:
@@ -218,6 +236,17 @@ def unique_candidate_docids(runs: list[dict[str, dict[str, float]]]) -> set[str]
         for candidates in run.values():
             docids.update(candidates)
     return docids
+
+
+def truncate_to_top_k(run: dict[str, dict[str, float]], k: int) -> dict[str, dict[str, float]]:
+    """Keep only each query's k highest-scoring candidates. Used to bound
+    dev's contribution to the encoding workload -- Task 6/Task 8 apply this
+    identically to dev_run before sampling training negatives, so the
+    encoded feature set and the training-sampling pool always agree."""
+    return {
+        qid: dict(sorted(candidates.items(), key=lambda kv: (kv[1], kv[0]), reverse=True)[:k])
+        for qid, candidates in run.items()
+    }
 
 
 def load_wand_runs() -> dict[str, dict[str, dict[str, float]]]:
@@ -247,8 +276,12 @@ def collect_candidate_texts(candidate_docids: set[str]) -> dict[str, str]:
 
 def main() -> None:
     wand_runs = load_wand_runs()
+    wand_runs["dev"] = truncate_to_top_k(wand_runs["dev"], DEV_NEGATIVE_POOL_DEPTH)
     candidate_docids = unique_candidate_docids(list(wand_runs.values()))
-    print(f"unique candidate docids across dev+dl19+dl20: {len(candidate_docids)}")
+    print(
+        f"unique candidate docids across dev (top {DEV_NEGATIVE_POOL_DEPTH}/query)"
+        f"+dl19+dl20: {len(candidate_docids)}"
+    )
 
     device = select_device()
     print(f"device: {device}")
@@ -311,12 +344,12 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest py/rank/tests/test_encode_candidates.py -v`
-Expected: 3 passed.
+Expected: 5 passed.
 
 - [ ] **Step 5: Run the real candidate encoding**
 
 Run: `PYTHONPATH=py uv run python -m rank.encode_candidates`
-Expected: prints the unique candidate docid count, `device: mps` (or `cpu`), a progress bar for candidate encoding, `wrote data/rank-candidate-texts.json (N docs)`, then progress bars for query encoding, then `wrote data/rank-dense-scores.jsonl (N rows)` where the row count is close to `6,974,879 + ~43,000 + ~54,000` (dev+dl19+dl20 run-file line counts). This encodes far fewer unique documents than Phase 3's 1M-passage subset (only the candidates that actually appear in these three run files), so expect low tens of minutes, not ~60 — but it is still a real encoding pass; run it in the background and poll rather than blocking on it, same as Phase 3's Task 3.
+Expected: prints the unique candidate docid count (bounded now — dev contributes at most `6,980 × 50 = 349,000` (qid, docid) slots instead of its untruncated ~6.97M, since dev's WAND candidates are truncated to each query's top 50 by score before encoding; dl19/dl20 stay full depth, contributing up to 97,000 more slots, `~43,000 + ~54,000`), `device: mps` (or `cpu`), a progress bar for candidate encoding, `wrote data/rank-candidate-texts.json (N docs)`, then progress bars for query encoding, then `wrote data/rank-dense-scores.jsonl (N rows)` where the row count is at most `349,000 + 43,000 + 54,000 ≈ 446,000` (fewer in practice — some dev queries return under 50 WAND hits). At this project's established ~128 docs/sec encoding rate (batch_size=32 on MPS), expect roughly 30-60 minutes, matching this plan's original tens-of-minutes estimate (the pre-fix, untruncated version of this step measured 3,767,002 unique docs and a 7-8 hour ETA — see Global Constraints' negative-sampling correction). Still a real encoding pass; run it in the background and poll rather than blocking on it, same as Phase 3's Task 3.
 
 - [ ] **Step 6: Sanity-check the output**
 
@@ -338,7 +371,7 @@ assert row['docid'] in texts
 assert texts[row['docid']]
 "
 ```
-Expected: a line count roughly matching the WAND run files' combined line count, the sample row has all four expected keys with plausible values, and its docid resolves to a non-empty passage text in `rank-candidate-texts.json`.
+Expected: a line count at most `349,000 + 43,000 + 54,000 ≈ 446,000` (well under the untruncated WAND run files' combined 7,071,879-line count), the sample row has all four expected keys with plausible values, and its docid resolves to a non-empty passage text in `rank-candidate-texts.json`.
 
 - [ ] **Step 7: Commit**
 
@@ -782,8 +815,10 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'rank.prerank_mlp'`.
 ```python
 """Pre-rank MLP: a small 3-input model (BM25 score, dense score, doc length)
 trained on dev's sparse binary qrels (1 positive + 4 sampled negatives per
-query with a judged-relevant doc), evaluated on dl19+dl20 -- reduces each
-query's up-to-1000 WAND candidates to the top ~100 by MLP score.
+query, sampled from that query's top-50 WAND-scored candidates -- see
+rank.encode_candidates.truncate_to_top_k and this phase's negative-sampling
+Global Constraint -- with a judged-relevant doc), evaluated on dl19+dl20 --
+reduces each query's up-to-1000 WAND candidates to the top ~100 by MLP score.
 
 Training a 3-input MLP has no GPU dependency -- this runs identically on CPU
 locally (for tests and smoke checks) and on Kaggle (at full dev/dl19/dl20
@@ -840,12 +875,18 @@ def build_training_examples(
     features: list[FeatureVector] = []
     labels: list[float] = []
     for qid, candidates in dev_run.items():
+        # Defensive: restrict to docids we actually have features for. Callers
+        # are expected to pass an already-truncated dev_run (see
+        # rank.encode_candidates.truncate_to_top_k) so this is normally a
+        # no-op, but it protects against a silent KeyError below if a caller
+        # ever passes an untruncated run that outruns what was encoded.
+        available = [d for d in candidates if (qid, d) in dense_scores]
         judgments = dev_qrels.get(qid, {})
-        positives = [docid for docid, rel in judgments.items() if rel > 0 and docid in candidates]
+        positives = [docid for docid in available if judgments.get(docid, 0) > 0]
         if not positives:
             continue
         positive_docid = positives[0]
-        negative_pool = [d for d in candidates if d != positive_docid]
+        negative_pool = [d for d in available if d != positive_docid]
         sample_size = min(num_negatives, len(negative_pool))
         negative_docids = rng.choice(negative_pool, size=sample_size, replace=False)
 
@@ -927,7 +968,7 @@ Expected: 3 passed.
 Run:
 ```bash
 PYTHONPATH=py uv run python3 -c "
-from rank.encode_candidates import load_wand_runs
+from rank.encode_candidates import DEV_NEGATIVE_POOL_DEPTH, load_wand_runs, truncate_to_top_k
 from rank.prerank_mlp import (
     build_mlp, build_training_examples, load_dense_scores_and_lengths, train_mlp,
 )
@@ -936,7 +977,8 @@ from harness.datasets import load_qrels
 import itertools
 
 wand_runs = load_wand_runs()
-dev_run = dict(itertools.islice(wand_runs['dev'].items(), 50))  # tiny slice
+dev_run_full = truncate_to_top_k(wand_runs['dev'], DEV_NEGATIVE_POOL_DEPTH)
+dev_run = dict(itertools.islice(dev_run_full.items(), 50))  # tiny slice
 dev_qrels = load_qrels('dev')
 dense_scores, doc_lengths = load_dense_scores_and_lengths('data/rank-dense-scores.jsonl')
 
@@ -1333,6 +1375,7 @@ from rank.crossencoder_harness import (
     run_batching_sweep,
     run_queue_discipline,
 )
+from rank.encode_candidates import DEV_NEGATIVE_POOL_DEPTH, truncate_to_top_k
 from rank.prerank_consistency import prerank_consistency
 from rank.prerank_features import fit_scaler
 from rank.prerank_mlp import (
@@ -1393,7 +1436,11 @@ def load_candidate_texts() -> dict[str, str]:
 
 
 def run_prerank_and_consistency() -> dict:
-    dev_run = read_run("runs/cascade-wand.dev.txt")
+    # Truncated to match exactly what Task 2 encoded features for -- dev's
+    # union of untruncated depth-1000 candidates is 3.77M unique docs, far
+    # more than the 1-positive-plus-4-negatives-per-query training loop ever
+    # consumes. See this phase's negative-sampling Global Constraint.
+    dev_run = truncate_to_top_k(read_run("runs/cascade-wand.dev.txt"), DEV_NEGATIVE_POOL_DEPTH)
     dev_qrels = load_qrels("dev")
     dense_scores, doc_lengths = load_dense_scores_and_lengths(Path("data/rank-dense-scores.jsonl"))
     candidate_texts = load_candidate_texts()
@@ -1767,7 +1814,7 @@ git commit -m "phase4: render the batching plot, precision table, and queue-disc
 - [ ] **Step 1: Run the full local test suite**
 
 Run: `uv run pytest -v`
-Expected: all tests pass, including the new `py/rank/tests/test_encode_candidates.py` (3), `test_prerank_features.py` (5), `test_prerank_consistency.py` (4), `test_batcher.py` (5), `test_prerank_mlp.py` (3), `test_crossencoder_harness.py` (3) — 23 new tests on top of the existing 65.
+Expected: all tests pass, including the new `py/rank/tests/test_encode_candidates.py` (5), `test_prerank_features.py` (5), `test_prerank_consistency.py` (4), `test_batcher.py` (5), `test_prerank_mlp.py` (3), `test_crossencoder_harness.py` (3) — 25 new tests on top of the existing 65.
 
 - [ ] **Step 2: Add the README section**
 
