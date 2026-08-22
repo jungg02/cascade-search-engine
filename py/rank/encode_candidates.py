@@ -20,9 +20,7 @@ import json
 from pathlib import Path
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
-from dense.encode import MODEL_NAME, apply_query_prefix, select_device
 from harness.datasets import iter_docs, load_queries
 from harness.runfile import read_run
 
@@ -80,6 +78,17 @@ def collect_candidate_texts(candidate_docids: set[str]) -> dict[str, str]:
 
 
 def main() -> None:
+    # Deliberately local, not module-level: Task 8's Kaggle driver imports
+    # this module only for DEV_NEGATIVE_POOL_DEPTH/truncate_to_top_k (pure,
+    # no ML dependency), and Kaggle never uploads py/dense/ -- a module-level
+    # `from dense.encode import ...` would crash that import with
+    # ModuleNotFoundError before the driver ever reached the names it
+    # actually wants. Only main() (the local, non-Kaggle encoding driver)
+    # needs the real encoder.
+    from sentence_transformers import SentenceTransformer
+
+    from dense.encode import MODEL_NAME, apply_query_prefix, select_device
+
     wand_runs = load_wand_runs()
     wand_runs["dev"] = truncate_to_top_k(wand_runs["dev"], DEV_NEGATIVE_POOL_DEPTH)
     candidate_docids = unique_candidate_docids(list(wand_runs.values()))
