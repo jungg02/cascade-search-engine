@@ -215,9 +215,7 @@ import json
 from pathlib import Path
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
-from dense.encode import MODEL_NAME, apply_query_prefix, select_device
 from harness.datasets import iter_docs, load_queries
 from harness.runfile import read_run
 
@@ -275,6 +273,17 @@ def collect_candidate_texts(candidate_docids: set[str]) -> dict[str, str]:
 
 
 def main() -> None:
+    # Deliberately local, not module-level: Task 8's Kaggle driver imports
+    # this module only for DEV_NEGATIVE_POOL_DEPTH/truncate_to_top_k (pure,
+    # no ML dependency), and Kaggle never uploads py/dense/ -- a module-level
+    # `from dense.encode import ...` would crash that import with
+    # ModuleNotFoundError before the driver ever reached the names it
+    # actually wants. Only main() (the local, non-Kaggle encoding driver)
+    # needs the real encoder.
+    from sentence_transformers import SentenceTransformer
+
+    from dense.encode import MODEL_NAME, apply_query_prefix, select_device
+
     wand_runs = load_wand_runs()
     wand_runs["dev"] = truncate_to_top_k(wand_runs["dev"], DEV_NEGATIVE_POOL_DEPTH)
     candidate_docids = unique_candidate_docids(list(wand_runs.values()))
@@ -1332,16 +1341,29 @@ This task has no local "run it" step — it is written and reviewed here, then t
 # Running Phase 4 on Kaggle
 
 1. Create a new Kaggle Notebook, enable a GPU (Settings -> Accelerator -> GPU T4 x2 or x1).
-2. Upload as a Kaggle Dataset (Add Data -> Upload):
+2. Upload as a Kaggle Dataset (Add Data -> Upload), preserving this directory layout
+   (`phase4_driver.py` does a plain `import rank.foo` / `import harness.foo`, so both
+   packages must be importable from the notebook's working directory — e.g. upload
+   into `/kaggle/working/py/rank/...` and `/kaggle/working/py/harness/...`, then add
+   `import sys; sys.path.insert(0, "/kaggle/working/py")` as the first cell before
+   running the driver):
    - The whole `py/rank/` directory (all `.py` files, not `tests/`).
-   - `py/harness/histogram.py`, `py/harness/runmeta.py`, and `py/harness/datasets.py`
-     (the three `harness` modules `phase4_driver.py` needs — `datasets.py` is
-     needed for `load_queries`, which pulls query text from `ir_datasets`;
-     `ir_datasets` itself must also be installed on Kaggle:
-     `!pip install ir_datasets`).
+   - `py/harness/__init__.py`, `py/harness/histogram.py`, `py/harness/runmeta.py`,
+     `py/harness/datasets.py`, `py/harness/metrics.py`, and `py/harness/runfile.py`
+     (all five `harness` modules `phase4_driver.py` imports, directly or via
+     `rank.crossencoder_harness`/`rank.prerank_mlp` — `datasets.py` is needed for
+     `load_queries`/`load_qrels`, which pull from `ir_datasets`; `ir_datasets` itself
+     must also be installed on Kaggle: `!pip install ir_datasets`).
    - `data/rank-dense-scores.jsonl` and `data/rank-candidate-texts.json`
-     (from Task 2's local run).
-   - `runs/cascade-wand.dev.txt`, `runs/cascade-wand.dl19.txt`, `runs/cascade-wand.dl20.txt`.
+     (from Task 2's local run), at `/kaggle/working/data/...` (or adjust
+     `phase4_driver.py`'s relative paths to wherever you place them).
+   - `runs/cascade-wand.dev.txt`, `runs/cascade-wand.dl19.txt`, `runs/cascade-wand.dl20.txt`,
+     at `/kaggle/working/runs/...` (same note as above).
+
+   Note: `py/dense/` is **not** needed here — `rank.encode_candidates` (imported by
+   the driver only for its pure `DEV_NEGATIVE_POOL_DEPTH`/`truncate_to_top_k` helpers)
+   imports `sentence_transformers`/`dense.encode` lazily, inside its own `main()`,
+   specifically so this Kaggle driver's import of it doesn't need `py/dense/` uploaded.
 3. In a notebook cell:
    ```bash
    !pip uninstall -y onnxruntime  # Kaggle images may preinstall the CPU build
