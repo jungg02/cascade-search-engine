@@ -1384,7 +1384,6 @@ from harness.datasets import load_qrels, load_queries
 from harness.metrics import evaluate
 from harness.runfile import read_run
 from harness.runmeta import run_metadata
-from rank.batcher import DynamicBatcher
 from rank.crossencoder_harness import (
     CrossEncoderSession,
     convert_to_fp16,
@@ -1504,7 +1503,17 @@ def run_prerank_and_consistency() -> dict:
             }
 
     mean_consistency = sum(consistency_scores) / len(consistency_scores)
-    eval_result = evaluate(fused_qrels, fused_run, ndcg_k=(10,), recall_k=(1000,), rel_threshold=2)
+    # recall_k must match CROSS_ENCODER_K, not the WAND run's original depth
+    # 1000 -- fused_run only ever holds each query's pre-rank survivors (at
+    # most CROSS_ENCODER_K docs), so recall@1000 over it would silently
+    # report a recall@CROSS_ENCODER_K number under a misleading deeper-sounding
+    # name. harness.metrics.EvalResult.shallow_metrics exists to catch exactly
+    # this (a cutoff deeper than the run); asked for the correct depth here so
+    # there's nothing for it to flag, and asserted below as a second guard.
+    eval_result = evaluate(
+        fused_qrels, fused_run, ndcg_k=(10,), recall_k=(CROSS_ENCODER_K,), rel_threshold=2
+    )
+    assert not eval_result.shallow_metrics, eval_result.shallow_metrics
 
     write_result(
         "prerank",
@@ -1512,8 +1521,9 @@ def run_prerank_and_consistency() -> dict:
             "mean_prerank_consistency": mean_consistency,
             "num_queries": len(consistency_scores),
             "cascade_ndcg_10": eval_result.mean["ndcg_cut_10"],
-            "cascade_recall_1000": eval_result.mean["recall_1000"],
+            "cascade_recall_100": eval_result.mean[f"recall_{CROSS_ENCODER_K}"],
             "top_k_survivors": CROSS_ENCODER_K,
+            "run_depth": eval_result.run_depth,
             "provenance": provenance(),
         },
     )
@@ -1584,7 +1594,12 @@ def run_precision(
         points = run_batching_sweep(session_factory, [(max_batch_size, max_wait_ms)], request_pairs, duration_s=10.0)
 
         precision_run = score_survivors_with_session(session, survivors_by_qid, candidate_texts)
-        eval_result = evaluate(fused_qrels, precision_run, ndcg_k=(10,), recall_k=(1000,), rel_threshold=2)
+        # recall_k matches CROSS_ENCODER_K for the same reason as
+        # run_prerank_and_consistency() -- precision_run also only ever
+        # holds the pre-rank survivors, not the full depth-1000 pool.
+        eval_result = evaluate(
+            fused_qrels, precision_run, ndcg_k=(10,), recall_k=(CROSS_ENCODER_K,), rel_threshold=2
+        )
         ndcg_10 = eval_result.mean["ndcg_cut_10"]
 
         results[precision] = {
@@ -1760,7 +1775,7 @@ as a separate recall channel.
 Of the true top-{prerank['top_k_survivors']} under the full cross-encoder
 ranker, **{prerank['mean_prerank_consistency']:.1%}** survive pre-ranking
 (mean over {prerank['num_queries']} dl19+dl20 queries). Full-cascade result:
-NDCG@10 = {prerank['cascade_ndcg_10']:.4f}, recall@1000 = {prerank['cascade_recall_1000']:.4f}.
+NDCG@10 = {prerank['cascade_ndcg_10']:.4f}, recall@100 = {prerank['cascade_recall_100']:.4f}.
 
 ## Dynamic batching: throughput vs. p99 latency
 
