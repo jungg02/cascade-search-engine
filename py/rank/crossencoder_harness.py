@@ -150,7 +150,13 @@ def run_batching_sweep(
         recorder = asyncio.run(
             _run_open_loop(
                 session,
-                batcher_factory=lambda: DynamicBatcher(max_batch_size, max_wait_ms, time.perf_counter),
+                # DynamicBatcher's clock contract is milliseconds (its
+                # max_wait_ms comparison assumes clock() ticks in ms) --
+                # time.perf_counter() ticks in seconds, so it must be scaled
+                # here or a "5ms" wait budget silently becomes 5 seconds.
+                batcher_factory=lambda: DynamicBatcher(
+                    max_batch_size, max_wait_ms, lambda: time.perf_counter() * 1000.0
+                ),
                 request_pairs=request_pairs,
                 duration_s=duration_s,
                 arrival_interval_s=0.001,
@@ -190,7 +196,11 @@ def run_queue_discipline(
     recorder = asyncio.run(
         _run_open_loop(
             session,
-            batcher_factory=lambda: DynamicBatcher(max_batch_size, max_wait_ms, time.perf_counter),
+            # See run_batching_sweep's comment: DynamicBatcher expects a
+            # millisecond clock, not seconds.
+            batcher_factory=lambda: DynamicBatcher(
+                max_batch_size, max_wait_ms, lambda: time.perf_counter() * 1000.0
+            ),
             request_pairs=request_pairs,
             duration_s=duration_s,
             arrival_interval_s=1.0 / arrival_rate_qps,
