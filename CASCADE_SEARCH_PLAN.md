@@ -1,11 +1,3 @@
-# Cascade — a multi-stage search engine with an enforced latency budget
-
-**Target role:** Software Engineer Intern, TikTok Search Architecture
-**Owner:** Hon Jung
-**Format:** phased build; each phase ends in a benchmark artifact, not a demo
-
----
-
 ## 0. Positioning
 
 ### What this project is
