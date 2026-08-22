@@ -236,6 +236,7 @@ def run_precision(
         eval_result = evaluate(
             fused_qrels, precision_run, ndcg_k=(10,), recall_k=(CROSS_ENCODER_K,), rel_threshold=2
         )
+        assert not eval_result.shallow_metrics, eval_result.shallow_metrics
         ndcg_10 = eval_result.mean["ndcg_cut_10"]
 
         results[precision] = {
