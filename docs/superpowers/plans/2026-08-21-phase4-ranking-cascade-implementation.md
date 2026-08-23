@@ -1067,6 +1067,24 @@ def test_session_scores_a_pair(fp32_onnx_path: Path):
     assert isinstance(scores[0], float)
 
 
+def test_session_reports_active_providers(fp32_onnx_path: Path):
+    session = CrossEncoderSession(fp32_onnx_path, MODEL_NAME, providers=["CPUExecutionProvider"])
+    assert session.active_providers == ["CPUExecutionProvider"]
+
+
+def test_score_chunks_batches_larger_than_chunk_size(fp32_onnx_path: Path):
+    # A real (if small-scale) regression test for the OOM this chunking
+    # fixes: scoring more pairs than chunk_size must still score every pair
+    # (via multiple internal session.run() calls), producing the same count
+    # and the same per-pair values a single unchunked call would.
+    session = CrossEncoderSession(fp32_onnx_path, MODEL_NAME, providers=["CPUExecutionProvider"])
+    pairs = [("what is python", f"passage number {i}") for i in range(10)]
+    chunked = session.score(pairs, chunk_size=3)
+    unchunked = session.score(pairs, chunk_size=len(pairs))
+    assert len(chunked) == len(pairs)
+    assert chunked == pytest.approx(unchunked)
+
+
 def test_batching_sweep_tiny_grid(fp32_onnx_path: Path):
     session = CrossEncoderSession(fp32_onnx_path, MODEL_NAME, providers=["CPUExecutionProvider"])
     pairs = [("query text", f"passage number {i}") for i in range(6)]
@@ -1162,21 +1180,48 @@ def quantize_int8(fp32_path: Path, int8_path: Path) -> None:
     quantize_dynamic(model_input=str(fp32_path), model_output=str(int8_path), weight_type=QuantType.QInt8)
 
 
+DEFAULT_SCORE_CHUNK_SIZE = 32
+
+
 class CrossEncoderSession:
     def __init__(self, onnx_path: Path, tokenizer_name: str, providers: list[str]) -> None:
         self._session = ort.InferenceSession(str(onnx_path), providers=providers)
         self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
-    def score(self, pairs: list[tuple[str, str]]) -> list[float]:
-        queries, passages = zip(*pairs)
-        encoded = self._tokenizer(
-            list(queries), list(passages), padding=True, truncation=True, return_tensors="np"
-        )
-        outputs = self._session.run(
-            ["logits"],
-            {"input_ids": encoded["input_ids"], "attention_mask": encoded["attention_mask"]},
-        )
-        return [float(x) for x in np.asarray(outputs[0]).reshape(-1)]
+    @property
+    def active_providers(self) -> list[str]:
+        """The execution providers ONNX Runtime actually initialized -- may
+        silently differ from what the caller requested. A CUDA/cuDNN version
+        mismatch makes ORT log a warning and fall back to CPU rather than
+        raise, so a caller that only checks for an exception at session
+        creation would never notice it ran the "GPU" experiment on CPU.
+        Callers must record this in their result's provenance rather than
+        assume the requested provider is the one that ran."""
+        return self._session.get_providers()
+
+    def score(
+        self, pairs: list[tuple[str, str]], chunk_size: int = DEFAULT_SCORE_CHUNK_SIZE
+    ) -> list[float]:
+        # Chunked so a caller scoring an unbounded candidate pool (e.g. every
+        # WAND candidate for a query, up to depth 1000) never hands a single
+        # unbounded batch to the tokenizer/session in one call -- padding to
+        # the batch's longest sequence times an unbounded batch size is an
+        # uncontrolled memory spike, worse still if CUDA silently fell back
+        # to CPU (see active_providers above) and the "GPU" run is actually
+        # consuming system RAM instead of VRAM.
+        scores: list[float] = []
+        for start in range(0, len(pairs), chunk_size):
+            chunk = pairs[start : start + chunk_size]
+            queries, passages = zip(*chunk)
+            encoded = self._tokenizer(
+                list(queries), list(passages), padding=True, truncation=True, return_tensors="np"
+            )
+            outputs = self._session.run(
+                ["logits"],
+                {"input_ids": encoded["input_ids"], "attention_mask": encoded["attention_mask"]},
+            )
+            scores.extend(float(x) for x in np.asarray(outputs[0]).reshape(-1))
+        return scores
 
 
 async def _run_open_loop(
@@ -1310,7 +1355,7 @@ def run_queue_discipline(
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest py/rank/tests/test_crossencoder_harness.py -v`
-Expected: 3 passed. This downloads `cross-encoder/ms-marco-MiniLM-L-6-v2` from HuggingFace on first run (a few hundred MB) and exports/scores it on CPU — expect tens of seconds for the module-scoped fixture, not minutes.
+Expected: 5 passed. This downloads `cross-encoder/ms-marco-MiniLM-L-6-v2` from HuggingFace on first run (a few hundred MB) and exports/scores it on CPU — expect tens of seconds for the module-scoped fixture, not minutes.
 
 - [ ] **Step 5: Commit**
 
@@ -1553,6 +1598,10 @@ def run_prerank_and_consistency() -> dict:
             "cascade_recall_100": eval_result.mean[f"recall_{CROSS_ENCODER_K}"],
             "top_k_survivors": CROSS_ENCODER_K,
             "run_depth": eval_result.run_depth,
+            # Requested CUDA -- may have silently fallen back to CPU (a
+            # CUDA/cuDNN version mismatch logs a warning, not an error).
+            # Recorded so a CPU-fallback run is never read as a GPU number.
+            "active_providers": session.active_providers,
             "provenance": provenance(),
         },
     )
@@ -1574,11 +1623,24 @@ def run_prerank_and_consistency() -> dict:
 def run_batching() -> list[dict]:
     onnx_dir = Path("onnx_models")
     fp32_path = onnx_dir / "model_fp32.onnx"
-    session_factory = lambda: CrossEncoderSession(fp32_path, MODEL_NAME, providers=["CUDAExecutionProvider"])
+    # Created once (not a factory that builds a fresh session per call) so
+    # active_providers below reflects the actual session run_batching_sweep
+    # used across the whole grid -- run_batching_sweep only calls its
+    # session_factory once internally anyway, so this changes nothing about
+    # the sweep itself, only makes the session inspectable afterward.
+    session = CrossEncoderSession(fp32_path, MODEL_NAME, providers=["CUDAExecutionProvider"])
     request_pairs = [("what does this query mean", f"candidate passage {i}") for i in range(256)]
 
-    points = run_batching_sweep(session_factory, BATCHING_GRID, request_pairs, duration_s=10.0)
-    write_result("batching", {"points": points, "grid": BATCHING_GRID, "provenance": provenance()})
+    points = run_batching_sweep(lambda: session, BATCHING_GRID, request_pairs, duration_s=10.0)
+    write_result(
+        "batching",
+        {
+            "points": points,
+            "grid": BATCHING_GRID,
+            "active_providers": session.active_providers,
+            "provenance": provenance(),
+        },
+    )
     return points
 
 
@@ -1636,6 +1698,7 @@ def run_precision(
             **points[0],
             "cascade_ndcg_10": ndcg_10,
             "ndcg_10_delta_vs_fp32": ndcg_10 - cascade_ndcg_10_fp32,
+            "active_providers": session.active_providers,
         }
 
     write_result(
@@ -1647,14 +1710,16 @@ def run_precision(
 def run_queue_disciplines(best_setting: tuple[int, float], baseline_throughput_qps: float) -> None:
     onnx_dir = Path("onnx_models")
     fp32_path = onnx_dir / "model_fp32.onnx"
-    session_factory = lambda: CrossEncoderSession(fp32_path, MODEL_NAME, providers=["CUDAExecutionProvider"])
+    # Created once, reused across all 6 discipline/multiplier runs -- same
+    # reasoning as run_batching() above.
+    session = CrossEncoderSession(fp32_path, MODEL_NAME, providers=["CUDAExecutionProvider"])
     request_pairs = [("what does this query mean", f"candidate passage {i}") for i in range(256)]
 
     runs = []
     for discipline in QUEUE_DISCIPLINES:
         for multiplier in QUEUE_OVERLOAD_MULTIPLIERS:
             result = run_queue_discipline(
-                session_factory,
+                lambda: session,
                 discipline=discipline,
                 arrival_rate_qps=baseline_throughput_qps * multiplier,
                 batcher_config=best_setting,
@@ -1662,7 +1727,10 @@ def run_queue_disciplines(best_setting: tuple[int, float], baseline_throughput_q
                 duration_s=10.0,
             )
             runs.append(result)
-    write_result("queue", {"runs": runs, "provenance": provenance()})
+    write_result(
+        "queue",
+        {"runs": runs, "active_providers": session.active_providers, "provenance": provenance()},
+    )
 
 
 def main() -> None:
@@ -1789,9 +1857,49 @@ def render_queue_table(queue: dict) -> str:
     return "\n".join(lines)
 
 
+def render_provider_warning(prerank: dict, batching: dict, precision: dict, queue: dict) -> str:
+    """Every rank-*.json result now records active_providers -- the ONNX
+    Runtime execution providers that actually initialized, which can
+    silently differ from what the driver requested (a CUDA/cuDNN version
+    mismatch logs a warning, not an error, and ONNX Runtime falls back to
+    CPU). Surfaced prominently, near the top of the report, rather than left
+    to a reader who happens to open the raw JSON -- a CPU-fallback run's
+    numbers are real, but they measure the wrong hardware for this phase's
+    stated question.
+    """
+    checks = {
+        "prerank/consistency": prerank.get("active_providers", []),
+        "batching sweep": batching.get("active_providers", []),
+        **{
+            f"precision ({name})": row.get("active_providers", [])
+            for name, row in precision.get("results", {}).items()
+        },
+        "queue discipline": queue.get("active_providers", []),
+    }
+    fell_back = {
+        name: providers
+        for name, providers in checks.items()
+        if providers and "CUDAExecutionProvider" not in providers
+    }
+    if not fell_back:
+        return "All sub-experiments ran on `CUDAExecutionProvider` as requested."
+    lines = [
+        "**⚠️ CUDA execution provider unavailable for at least one "
+        "sub-experiment -- the numbers below reflect CPU, not GPU, for:**",
+        "",
+    ]
+    for name, providers in fell_back.items():
+        lines.append(f"- {name}: ran on `{', '.join(providers)}`")
+    return "\n".join(lines)
+
+
 def render_markdown(prerank: dict, batching: dict, precision: dict, queue: dict) -> str:
     provenance = prerank["provenance"]
     return f"""# Phase 4: Ranking Cascade and Heterogeneous Serving
+
+## Execution provider check
+
+{render_provider_warning(prerank, batching, precision, queue)}
 
 ## Candidate pool (limitation, stated up front)
 
@@ -1877,7 +1985,7 @@ git commit -m "phase4: render the batching plot, precision table, and queue-disc
 - [ ] **Step 1: Run the full local test suite**
 
 Run: `uv run pytest -v`
-Expected: all tests pass, including the new `py/rank/tests/test_encode_candidates.py` (5), `test_prerank_features.py` (5), `test_prerank_consistency.py` (4), `test_batcher.py` (5), `test_prerank_mlp.py` (3), `test_crossencoder_harness.py` (3) — 25 new tests on top of the existing 65.
+Expected: all tests pass, including the new `py/rank/tests/test_encode_candidates.py` (5), `test_prerank_features.py` (5), `test_prerank_consistency.py` (4), `test_batcher.py` (5), `test_prerank_mlp.py` (3), `test_crossencoder_harness.py` (5) — 27 new tests on top of the existing 65.
 
 - [ ] **Step 2: Add the README section**
 
