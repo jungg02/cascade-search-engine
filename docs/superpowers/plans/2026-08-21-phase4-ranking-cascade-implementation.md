@@ -142,7 +142,7 @@ git commit -m "phase4: add ranking-cascade dependencies and package scaffolding"
 
 **Interfaces:**
 - Consumes: `runs/cascade-wand.{dev,dl19,dl20}.txt` (Phase 1, via `harness.runfile.read_run`), `harness.datasets.load_queries(query_set: str) -> dict[str, str]`, `harness.datasets.iter_docs(limit: int | None = None) -> Iterator[tuple[str, str]]`, `dense.encode.apply_query_prefix(text: str) -> str`, `dense.encode.select_device() -> str`.
-- Produces: `unique_candidate_docids(runs: list[dict[str, dict[str, float]]]) -> set[str]` (pure, unit-tested) and `truncate_to_top_k(run: dict[str, dict[str, float]], k: int) -> dict[str, dict[str, float]]` (pure, unit-tested — keeps each query's k highest-scoring candidates; Task 6 and Task 8 import this too, applying it identically to `dev_run` before sampling training negatives, so the encoded feature set and the training-sampling pool always agree by construction). CLI writes `data/rank-dense-scores.jsonl` — one JSON object per line, `{"qid": str, "docid": str, "dense_score": float, "doc_length": int}`, for every (query, candidate) pair across dl19+dl20's full depth-1000 WAND runs plus dev's **top-50-per-query truncated** run (see Global Constraints' negative-sampling correction) — and `data/rank-candidate-texts.json` — a flat `{docid: passage_text}` mapping for every unique candidate docid retained after that truncation, so Task 8's Kaggle driver can build real cross-encoder input pairs without ever needing the full 8.8M-passage corpus there.
+- Produces: `unique_candidate_docids(runs: list[dict[str, dict[str, float]]]) -> set[str]` (pure, unit-tested), `truncate_to_top_k(run: dict[str, dict[str, float]], k: int) -> dict[str, dict[str, float]]` (pure, unit-tested — keeps each query's k highest-scoring candidates; Task 6's local smoke test imports this directly), and `read_run_truncated(path: str | Path, k: int) -> dict[str, dict[str, float]]` (a streaming `read_run`+`truncate_to_top_k` fused into one pass, never materializing more than k entries per query — Task 8's Kaggle driver imports this instead of the two-step form, since the two-step form was a real, avoidable memory-pressure contributor to a Kaggle OOM found during this phase's actual Kaggle run; both forms produce byte-identical output given the same inputs, verified by a dedicated test). CLI writes `data/rank-dense-scores.jsonl` — one JSON object per line, `{"qid": str, "docid": str, "dense_score": float, "doc_length": int}`, for every (query, candidate) pair across dl19+dl20's full depth-1000 WAND runs plus dev's **top-50-per-query truncated** run (see Global Constraints' negative-sampling correction) — and `data/rank-candidate-texts.json` — a flat `{docid: passage_text}` mapping for every unique candidate docid retained after that truncation, so Task 8's Kaggle driver can build real cross-encoder input pairs without ever needing the full 8.8M-passage corpus there.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -154,7 +154,10 @@ run dicts rather than the real WAND run files."""
 
 from __future__ import annotations
 
-from rank.encode_candidates import truncate_to_top_k, unique_candidate_docids
+from pathlib import Path
+
+from harness.runfile import read_run
+from rank.encode_candidates import read_run_truncated, truncate_to_top_k, unique_candidate_docids
 
 
 def test_union_across_multiple_runs():
@@ -183,6 +186,25 @@ def test_truncate_to_top_k_leaves_short_queries_unchanged():
     run = {"q1": {"d1": 1.0}}
     result = truncate_to_top_k(run, k=5)
     assert result == {"q1": {"d1": 1.0}}
+
+
+def test_read_run_truncated_matches_read_run_then_truncate(tmp_path: Path):
+    # A real run file, deliberately pre-sorted descending per query (the
+    # invariant read_run_truncated relies on -- matches how
+    # harness.runfile.write_run always writes, and how every WAND run in
+    # this project is produced).
+    run_file = tmp_path / "run.txt"
+    run_file.write_text(
+        "q1 Q0 d2 1 5.0 tag\n"
+        "q1 Q0 d3 2 3.0 tag\n"
+        "q1 Q0 d4 3 2.0 tag\n"
+        "q1 Q0 d1 4 1.0 tag\n"
+        "q2 Q0 d5 1 9.0 tag\n"
+    )
+    streamed = read_run_truncated(run_file, k=2)
+    materialized = truncate_to_top_k(read_run(run_file), k=2)
+    assert streamed == materialized
+    assert streamed == {"q1": {"d2": 5.0, "d3": 3.0}, "q2": {"d5": 9.0}}
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -252,6 +274,37 @@ def load_wand_runs() -> dict[str, dict[str, dict[str, float]]]:
         query_set: read_run(RUNS_DIR / f"cascade-wand.{query_set}.txt")
         for query_set in QUERY_SETS
     }
+
+
+def read_run_truncated(path: str | Path, k: int) -> dict[str, dict[str, float]]:
+    """Streaming equivalent of `harness.runfile.read_run(path)` followed by
+    `truncate_to_top_k(run, k)`, but never holds more than k entries per
+    query in memory -- relies on each query's block being pre-sorted
+    descending by score, which is the format `harness.runfile.write_run`
+    always produces and what every WAND run in this project is written by
+    (verified directly against cascade-wand.dev.txt: no query's block ever
+    has a later line score higher than an earlier one).
+
+    Exists because dev's untruncated file is 6,974,879 lines / 374MB --
+    materializing that whole nested dict via read_run() just to immediately
+    discard all but the top k per query (at most 349,000 of 3.77M entries)
+    is real, avoidable memory pressure on a resource-constrained host. Found
+    during this phase's real Kaggle run: the driver's dev_run load was the
+    single largest avoidable allocation contributing to an out-of-memory
+    kernel restart.
+    """
+    run: dict[str, dict[str, float]] = {}
+    with open(path) as handle:
+        for line in handle:
+            fields = line.split()
+            if not fields:
+                continue
+            qid, _, docid, _, score, *_ = fields
+            bucket = run.setdefault(qid, {})
+            if len(bucket) >= k:
+                continue
+            bucket[docid] = float(score)
+    return run
 
 
 def collect_candidate_texts(candidate_docids: set[str]) -> dict[str, str]:
@@ -353,7 +406,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest py/rank/tests/test_encode_candidates.py -v`
-Expected: 5 passed.
+Expected: 6 passed.
 
 - [ ] **Step 5: Run the real candidate encoding**
 
@@ -1466,7 +1519,7 @@ from rank.crossencoder_harness import (
     run_batching_sweep,
     run_queue_discipline,
 )
-from rank.encode_candidates import DEV_NEGATIVE_POOL_DEPTH, truncate_to_top_k
+from rank.encode_candidates import DEV_NEGATIVE_POOL_DEPTH, read_run_truncated
 from rank.prerank_consistency import prerank_consistency
 from rank.prerank_features import fit_scaler
 from rank.prerank_mlp import (
@@ -1527,11 +1580,16 @@ def load_candidate_texts() -> dict[str, str]:
 
 
 def run_prerank_and_consistency() -> dict:
-    # Truncated to match exactly what Task 2 encoded features for -- dev's
-    # union of untruncated depth-1000 candidates is 3.77M unique docs, far
-    # more than the 1-positive-plus-4-negatives-per-query training loop ever
-    # consumes. See this phase's negative-sampling Global Constraint.
-    dev_run = truncate_to_top_k(read_run("runs/cascade-wand.dev.txt"), DEV_NEGATIVE_POOL_DEPTH)
+    # Streamed and truncated together -- dev's union of untruncated
+    # depth-1000 candidates is 3.77M unique docs / 6,974,879 lines (374MB),
+    # far more than the 1-positive-plus-4-negatives-per-query training loop
+    # ever consumes. Materializing the full file via read_run() first (as
+    # this line used to do, calling truncate_to_top_k(read_run(...), ...))
+    # was a real, avoidable contributor to a Kaggle OOM kernel restart --
+    # read_run_truncated never holds more than DEV_NEGATIVE_POOL_DEPTH
+    # entries per query. See this phase's negative-sampling Global
+    # Constraint and its Kaggle-OOM ruling.
+    dev_run = read_run_truncated("runs/cascade-wand.dev.txt", DEV_NEGATIVE_POOL_DEPTH)
     dev_qrels = load_qrels("dev")
     dense_scores, doc_lengths = load_dense_scores_and_lengths(Path("data/rank-dense-scores.jsonl"))
     candidate_texts = load_candidate_texts()
@@ -1985,7 +2043,7 @@ git commit -m "phase4: render the batching plot, precision table, and queue-disc
 - [ ] **Step 1: Run the full local test suite**
 
 Run: `uv run pytest -v`
-Expected: all tests pass, including the new `py/rank/tests/test_encode_candidates.py` (5), `test_prerank_features.py` (5), `test_prerank_consistency.py` (4), `test_batcher.py` (5), `test_prerank_mlp.py` (3), `test_crossencoder_harness.py` (5) — 27 new tests on top of the existing 65.
+Expected: all tests pass, including the new `py/rank/tests/test_encode_candidates.py` (6), `test_prerank_features.py` (5), `test_prerank_consistency.py` (4), `test_batcher.py` (5), `test_prerank_mlp.py` (3), `test_crossencoder_harness.py` (5) — 28 new tests on top of the existing 65.
 
 - [ ] **Step 2: Add the README section**
 
