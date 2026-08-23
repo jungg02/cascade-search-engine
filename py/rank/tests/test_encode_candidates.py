@@ -3,7 +3,10 @@ run dicts rather than the real WAND run files."""
 
 from __future__ import annotations
 
-from rank.encode_candidates import truncate_to_top_k, unique_candidate_docids
+from pathlib import Path
+
+from harness.runfile import read_run
+from rank.encode_candidates import read_run_truncated, truncate_to_top_k, unique_candidate_docids
 
 
 def test_union_across_multiple_runs():
@@ -32,3 +35,22 @@ def test_truncate_to_top_k_leaves_short_queries_unchanged():
     run = {"q1": {"d1": 1.0}}
     result = truncate_to_top_k(run, k=5)
     assert result == {"q1": {"d1": 1.0}}
+
+
+def test_read_run_truncated_matches_read_run_then_truncate(tmp_path: Path):
+    # A real run file, deliberately pre-sorted descending per query (the
+    # invariant read_run_truncated relies on -- matches how
+    # harness.runfile.write_run always writes, and how every WAND run in
+    # this project is produced).
+    run_file = tmp_path / "run.txt"
+    run_file.write_text(
+        "q1 Q0 d2 1 5.0 tag\n"
+        "q1 Q0 d3 2 3.0 tag\n"
+        "q1 Q0 d4 3 2.0 tag\n"
+        "q1 Q0 d1 4 1.0 tag\n"
+        "q2 Q0 d5 1 9.0 tag\n"
+    )
+    streamed = read_run_truncated(run_file, k=2)
+    materialized = truncate_to_top_k(read_run(run_file), k=2)
+    assert streamed == materialized
+    assert streamed == {"q1": {"d2": 5.0, "d3": 3.0}, "q2": {"d5": 9.0}}

@@ -28,7 +28,7 @@ from rank.crossencoder_harness import (
     run_batching_sweep,
     run_queue_discipline,
 )
-from rank.encode_candidates import DEV_NEGATIVE_POOL_DEPTH, truncate_to_top_k
+from rank.encode_candidates import DEV_NEGATIVE_POOL_DEPTH, read_run_truncated
 from rank.prerank_consistency import prerank_consistency
 from rank.prerank_features import fit_scaler
 from rank.prerank_mlp import (
@@ -42,7 +42,7 @@ from rank.prerank_mlp import (
 # Filled in by hand before uploading -- `git rev-parse HEAD` on this repo,
 # immediately before uploading this file. Kaggle has no git repo to read it
 # from; see this phase's design spec's "Kaggle provenance gap."
-SOURCE_GIT_SHA = "4a98fb3ef9c46bf9466ebc4379330f135bf002ab"
+SOURCE_GIT_SHA = "b08268d8e9785589255892c5acebdd7453fd7532"
 
 RESULTS_DIR = Path("bench/results")
 MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -89,11 +89,16 @@ def load_candidate_texts() -> dict[str, str]:
 
 
 def run_prerank_and_consistency() -> dict:
-    # Truncated to match exactly what Task 2 encoded features for -- dev's
-    # union of untruncated depth-1000 candidates is 3.77M unique docs, far
-    # more than the 1-positive-plus-4-negatives-per-query training loop ever
-    # consumes. See this phase's negative-sampling Global Constraint.
-    dev_run = truncate_to_top_k(read_run("runs/cascade-wand.dev.txt"), DEV_NEGATIVE_POOL_DEPTH)
+    # Streamed and truncated together -- dev's union of untruncated
+    # depth-1000 candidates is 3.77M unique docs / 6,974,879 lines (374MB),
+    # far more than the 1-positive-plus-4-negatives-per-query training loop
+    # ever consumes. Materializing the full file via read_run() first (as
+    # this line used to do, calling truncate_to_top_k(read_run(...), ...))
+    # was a real, avoidable contributor to a Kaggle OOM kernel restart --
+    # read_run_truncated never holds more than DEV_NEGATIVE_POOL_DEPTH
+    # entries per query. See this phase's negative-sampling Global
+    # Constraint and its Kaggle-OOM ruling.
+    dev_run = read_run_truncated("runs/cascade-wand.dev.txt", DEV_NEGATIVE_POOL_DEPTH)
     dev_qrels = load_qrels("dev")
     dense_scores, doc_lengths = load_dense_scores_and_lengths(Path("data/rank-dense-scores.jsonl"))
     candidate_texts = load_candidate_texts()

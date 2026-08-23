@@ -59,6 +59,37 @@ def load_wand_runs() -> dict[str, dict[str, dict[str, float]]]:
     }
 
 
+def read_run_truncated(path: str | Path, k: int) -> dict[str, dict[str, float]]:
+    """Streaming equivalent of `harness.runfile.read_run(path)` followed by
+    `truncate_to_top_k(run, k)`, but never holds more than k entries per
+    query in memory -- relies on each query's block being pre-sorted
+    descending by score, which is the format `harness.runfile.write_run`
+    always produces and what every WAND run in this project is written by
+    (verified directly against cascade-wand.dev.txt: no query's block ever
+    has a later line score higher than an earlier one).
+
+    Exists because dev's untruncated file is 6,974,879 lines / 374MB --
+    materializing that whole nested dict via read_run() just to immediately
+    discard all but the top k per query (at most 349,000 of 3.77M entries)
+    is real, avoidable memory pressure on a resource-constrained host. Found
+    during this phase's real Kaggle run: the driver's dev_run load was the
+    single largest avoidable allocation contributing to an out-of-memory
+    kernel restart.
+    """
+    run: dict[str, dict[str, float]] = {}
+    with open(path) as handle:
+        for line in handle:
+            fields = line.split()
+            if not fields:
+                continue
+            qid, _, docid, _, score, *_ = fields
+            bucket = run.setdefault(qid, {})
+            if len(bucket) >= k:
+                continue
+            bucket[docid] = float(score)
+    return run
+
+
 def collect_candidate_texts(candidate_docids: set[str]) -> dict[str, str]:
     """Single streaming pass over the corpus, matching dense/subset.py's pattern
     for pulling a bounded docid set out of the full 8.8M-passage stream."""
