@@ -42,7 +42,7 @@ from rank.prerank_mlp import (
 # Filled in by hand before uploading -- `git rev-parse HEAD` on this repo,
 # immediately before uploading this file. Kaggle has no git repo to read it
 # from; see this phase's design spec's "Kaggle provenance gap."
-SOURCE_GIT_SHA = "REPLACE_ME_BEFORE_UPLOADING"
+SOURCE_GIT_SHA = "4a98fb3ef9c46bf9466ebc4379330f135bf002ab"
 
 RESULTS_DIR = Path("bench/results")
 MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -160,6 +160,10 @@ def run_prerank_and_consistency() -> dict:
             "cascade_recall_100": eval_result.mean[f"recall_{CROSS_ENCODER_K}"],
             "top_k_survivors": CROSS_ENCODER_K,
             "run_depth": eval_result.run_depth,
+            # Requested CUDA -- may have silently fallen back to CPU (a
+            # CUDA/cuDNN version mismatch logs a warning, not an error).
+            # Recorded so a CPU-fallback run is never read as a GPU number.
+            "active_providers": session.active_providers,
             "provenance": provenance(),
         },
     )
@@ -181,11 +185,24 @@ def run_prerank_and_consistency() -> dict:
 def run_batching() -> list[dict]:
     onnx_dir = Path("onnx_models")
     fp32_path = onnx_dir / "model_fp32.onnx"
-    session_factory = lambda: CrossEncoderSession(fp32_path, MODEL_NAME, providers=["CUDAExecutionProvider"])
+    # Created once (not a factory that builds a fresh session per call) so
+    # active_providers below reflects the actual session run_batching_sweep
+    # used across the whole grid -- run_batching_sweep only calls its
+    # session_factory once internally anyway, so this changes nothing about
+    # the sweep itself, only makes the session inspectable afterward.
+    session = CrossEncoderSession(fp32_path, MODEL_NAME, providers=["CUDAExecutionProvider"])
     request_pairs = [("what does this query mean", f"candidate passage {i}") for i in range(256)]
 
-    points = run_batching_sweep(session_factory, BATCHING_GRID, request_pairs, duration_s=10.0)
-    write_result("batching", {"points": points, "grid": BATCHING_GRID, "provenance": provenance()})
+    points = run_batching_sweep(lambda: session, BATCHING_GRID, request_pairs, duration_s=10.0)
+    write_result(
+        "batching",
+        {
+            "points": points,
+            "grid": BATCHING_GRID,
+            "active_providers": session.active_providers,
+            "provenance": provenance(),
+        },
+    )
     return points
 
 
@@ -243,6 +260,7 @@ def run_precision(
             **points[0],
             "cascade_ndcg_10": ndcg_10,
             "ndcg_10_delta_vs_fp32": ndcg_10 - cascade_ndcg_10_fp32,
+            "active_providers": session.active_providers,
         }
 
     write_result(
@@ -254,14 +272,16 @@ def run_precision(
 def run_queue_disciplines(best_setting: tuple[int, float], baseline_throughput_qps: float) -> None:
     onnx_dir = Path("onnx_models")
     fp32_path = onnx_dir / "model_fp32.onnx"
-    session_factory = lambda: CrossEncoderSession(fp32_path, MODEL_NAME, providers=["CUDAExecutionProvider"])
+    # Created once, reused across all 6 discipline/multiplier runs -- same
+    # reasoning as run_batching() above.
+    session = CrossEncoderSession(fp32_path, MODEL_NAME, providers=["CUDAExecutionProvider"])
     request_pairs = [("what does this query mean", f"candidate passage {i}") for i in range(256)]
 
     runs = []
     for discipline in QUEUE_DISCIPLINES:
         for multiplier in QUEUE_OVERLOAD_MULTIPLIERS:
             result = run_queue_discipline(
-                session_factory,
+                lambda: session,
                 discipline=discipline,
                 arrival_rate_qps=baseline_throughput_qps * multiplier,
                 batcher_config=best_setting,
@@ -269,7 +289,10 @@ def run_queue_disciplines(best_setting: tuple[int, float], baseline_throughput_q
                 duration_s=10.0,
             )
             runs.append(result)
-    write_result("queue", {"runs": runs, "provenance": provenance()})
+    write_result(
+        "queue",
+        {"runs": runs, "active_providers": session.active_providers, "provenance": provenance()},
+    )
 
 
 def main() -> None:

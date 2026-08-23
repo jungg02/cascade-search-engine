@@ -40,6 +40,24 @@ def test_session_scores_a_pair(fp32_onnx_path: Path):
     assert isinstance(scores[0], float)
 
 
+def test_session_reports_active_providers(fp32_onnx_path: Path):
+    session = CrossEncoderSession(fp32_onnx_path, MODEL_NAME, providers=["CPUExecutionProvider"])
+    assert session.active_providers == ["CPUExecutionProvider"]
+
+
+def test_score_chunks_batches_larger_than_chunk_size(fp32_onnx_path: Path):
+    # A real (if small-scale) regression test for the OOM this chunking
+    # fixes: scoring more pairs than chunk_size must still score every pair
+    # (via multiple internal session.run() calls), producing the same count
+    # and the same per-pair values a single unchunked call would.
+    session = CrossEncoderSession(fp32_onnx_path, MODEL_NAME, providers=["CPUExecutionProvider"])
+    pairs = [("what is python", f"passage number {i}") for i in range(10)]
+    chunked = session.score(pairs, chunk_size=3)
+    unchunked = session.score(pairs, chunk_size=len(pairs))
+    assert len(chunked) == len(pairs)
+    assert chunked == pytest.approx(unchunked)
+
+
 def test_batching_sweep_tiny_grid(fp32_onnx_path: Path):
     session = CrossEncoderSession(fp32_onnx_path, MODEL_NAME, providers=["CPUExecutionProvider"])
     pairs = [("query text", f"passage number {i}") for i in range(6)]

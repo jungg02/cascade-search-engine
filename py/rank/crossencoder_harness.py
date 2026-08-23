@@ -71,21 +71,48 @@ def quantize_int8(fp32_path: Path, int8_path: Path) -> None:
     quantize_dynamic(model_input=str(fp32_path), model_output=str(int8_path), weight_type=QuantType.QInt8)
 
 
+DEFAULT_SCORE_CHUNK_SIZE = 32
+
+
 class CrossEncoderSession:
     def __init__(self, onnx_path: Path, tokenizer_name: str, providers: list[str]) -> None:
         self._session = ort.InferenceSession(str(onnx_path), providers=providers)
         self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
-    def score(self, pairs: list[tuple[str, str]]) -> list[float]:
-        queries, passages = zip(*pairs)
-        encoded = self._tokenizer(
-            list(queries), list(passages), padding=True, truncation=True, return_tensors="np"
-        )
-        outputs = self._session.run(
-            ["logits"],
-            {"input_ids": encoded["input_ids"], "attention_mask": encoded["attention_mask"]},
-        )
-        return [float(x) for x in np.asarray(outputs[0]).reshape(-1)]
+    @property
+    def active_providers(self) -> list[str]:
+        """The execution providers ONNX Runtime actually initialized -- may
+        silently differ from what the caller requested. A CUDA/cuDNN version
+        mismatch makes ORT log a warning and fall back to CPU rather than
+        raise, so a caller that only checks for an exception at session
+        creation would never notice it ran the "GPU" experiment on CPU.
+        Callers must record this in their result's provenance rather than
+        assume the requested provider is the one that ran."""
+        return self._session.get_providers()
+
+    def score(
+        self, pairs: list[tuple[str, str]], chunk_size: int = DEFAULT_SCORE_CHUNK_SIZE
+    ) -> list[float]:
+        # Chunked so a caller scoring an unbounded candidate pool (e.g. every
+        # WAND candidate for a query, up to depth 1000) never hands a single
+        # unbounded batch to the tokenizer/session in one call -- padding to
+        # the batch's longest sequence times an unbounded batch size is an
+        # uncontrolled memory spike, worse still if CUDA silently fell back
+        # to CPU (see active_providers above) and the "GPU" run is actually
+        # consuming system RAM instead of VRAM.
+        scores: list[float] = []
+        for start in range(0, len(pairs), chunk_size):
+            chunk = pairs[start : start + chunk_size]
+            queries, passages = zip(*chunk)
+            encoded = self._tokenizer(
+                list(queries), list(passages), padding=True, truncation=True, return_tensors="np"
+            )
+            outputs = self._session.run(
+                ["logits"],
+                {"input_ids": encoded["input_ids"], "attention_mask": encoded["attention_mask"]},
+            )
+            scores.extend(float(x) for x in np.asarray(outputs[0]).reshape(-1))
+        return scores
 
 
 async def _run_open_loop(
