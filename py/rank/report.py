@@ -18,6 +18,14 @@ RESULTS_DIR = REPO_ROOT / "bench" / "results"
 PLOTS_DIR = REPO_ROOT / "bench" / "plots"
 BENCH_DIR = REPO_ROOT / "bench"
 
+# Phase 1's own first-stage baseline over the same 97 dl19+dl20 queries this
+# phase's prerank-consistency section evaluates against -- pooled from
+# bench/phase1.md's per-set NDCG@10 (dl19 0.5052 / 43 queries, dl20 0.4785 /
+# 54 queries): (43*0.5052 + 54*0.4785) / 97. Phase 1 is historical and fixed,
+# not re-derived from its rerun, so this is a constant rather than something
+# read from bench/phase1.md at render time.
+PHASE1_BASELINE_NDCG_10 = 0.4903
+
 
 def render_batching_plot(batching: dict, output_path: Path) -> None:
     points = batching["points"]
@@ -52,27 +60,37 @@ def render_batching_table(batching: dict) -> str:
 
 
 def render_precision_table(precision: dict) -> str:
+    # p999 and max, not just p99: the real fp16 run's p999/max were ~10x its
+    # own p99 (244ms/252ms against a ~25ms p99), a tail entirely invisible in
+    # a p99-only table. .get(..., 0) rather than direct indexing so a
+    # rank-precision.json written before these keys existed still renders.
     lines = [
-        "| precision | throughput (qps) | p99 (ms) | cascade NDCG@10 | delta vs. fp32 |",
-        "|---|---|---|---|---|",
+        "| precision | throughput (qps) | p99 (ms) | p999 (ms) | max (ms) | cascade NDCG@10 | delta vs. fp32 |",
+        "|---|---|---|---|---|---|---|",
     ]
     for name, row in precision["results"].items():
         lines.append(
             f"| {name} | {row['throughput_qps']:.1f} | {row['latency_us']['p99_us']/1000:.2f} | "
+            f"{row['latency_us'].get('p999_us', 0)/1000:.2f} | {row['latency_us'].get('max_us', 0)/1000:.2f} | "
             f"{row['cascade_ndcg_10']:.4f} | {row['ndcg_10_delta_vs_fp32']:+.4f} |"
         )
     return "\n".join(lines)
 
 
 def render_queue_table(queue: dict) -> str:
+    # achieved_qps next to the arrival rate is the whole point of an open-loop
+    # generator: the gap between offered and achieved is the backlog, and
+    # queue_delay p99 says how much of the client-visible latency it cost.
     lines = [
-        "| discipline | arrival rate (qps) | p99 (ms) | shed count |",
-        "|---|---|---|---|",
+        "| discipline | arrival rate (qps) | achieved (qps) | p99 (ms) | queue delay p99 (ms) | shed count |",
+        "|---|---|---|---|---|---|",
     ]
     for row in queue["runs"]:
         lines.append(
             f"| {row['discipline']} | {row['arrival_rate_qps']:.1f} | "
-            f"{row['latency_us'].get('p99_us', 0)/1000:.2f} | {row['shed_count']} |"
+            f"{row.get('achieved_qps', 0):.1f} | "
+            f"{row['latency_us'].get('p99_us', 0)/1000:.2f} | "
+            f"{row.get('queue_delay_us', {}).get('p99_us', 0)/1000:.2f} | {row['shed_count']} |"
         )
     return "\n".join(lines)
 
@@ -96,10 +114,14 @@ def render_provider_warning(prerank: dict, batching: dict, precision: dict, queu
         },
         "queue discipline": queue.get("active_providers", []),
     }
+    # No `providers and ...` guard: a missing/empty active_providers field is
+    # not evidence the run used CUDA, it is evidence the run didn't record
+    # what it used -- which is exactly the silent-fallback case this check
+    # exists to catch, so it must fire rather than pass.
     fell_back = {
         name: providers
         for name, providers in checks.items()
-        if providers and "CUDAExecutionProvider" not in providers
+        if "CUDAExecutionProvider" not in providers
     }
     if not fell_back:
         return "All sub-experiments ran on `CUDAExecutionProvider` as requested."
@@ -134,6 +156,8 @@ Of the true top-{prerank['top_k_survivors']} under the full cross-encoder
 ranker, **{prerank['mean_prerank_consistency']:.1%}** survive pre-ranking
 (mean over {prerank['num_queries']} dl19+dl20 queries). Full-cascade result:
 NDCG@10 = {prerank['cascade_ndcg_10']:.4f}, recall@100 = {prerank['cascade_recall_100']:.4f}.
+Phase 1's own first-stage (lexical-only) baseline over the same 97
+queries: NDCG@10 = {PHASE1_BASELINE_NDCG_10:.4f}.
 
 ## Dynamic batching: throughput vs. p99 latency
 

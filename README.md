@@ -44,8 +44,17 @@ pybind11's headers, which come from the venv.
 
 ```bash
 uv sync --extra dev --extra baselines
-uv run pytest                      # 62 tests, no corpus needed
+uv run pytest                      # 96 pass, 3 skip, no corpus needed
 ```
+
+The 3 skips are `py/server/tests/test_server_integration.py`, which needs the
+built cascade index and generated proto stubs (Phase 1 and Phase 2 setup below).
+`py/rank/tests` needs network access: it downloads the real
+`cross-encoder/ms-marco-MiniLM-L-6-v2` from Hugging Face
+(`AutoTokenizer.from_pretrained` / `AutoModelForSequenceClassification.from_pretrained`)
+rather than using a mocked or vendored model, and exports it to ONNX on the fly.
+Nothing there is mocked, which is the point — the ONNX export path is what the
+Kaggle run depends on, so it is exercised for real, just at CPU scale.
 
 The baselines additionally need an arm64 JDK 21 and the Anserini fatjar in
 `.tools/`, and roughly 10 GB of disk for the corpus and indexes:
