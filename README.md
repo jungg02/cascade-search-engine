@@ -14,7 +14,7 @@ Full design: [`CASCADE_SEARCH_PLAN.md`](CASCADE_SEARCH_PLAN.md).
 | 1 — C++ index + BlockMax-WAND | `bench/phase1.md` | **done** |
 | 2 — Serving, sharding, tail latency | capacity statement | sub-project A done |
 | 3 — Dense recall | ANN Pareto frontier | **done** |
-| 4 — Ranking cascade | batching + precision tables | not started |
+| 4 — Ranking cascade | batching + precision tables | **done** |
 | 5 — Video, multi-field | field ablations | not started |
 | 6 — Near-real-time indexing | freshness/latency tradeoff | not started |
 
@@ -138,6 +138,29 @@ uv run python -m dense.report          # -> bench/phase3.md, bench/plots/phase3-
 This machine has 8GB RAM and no GPU, so this phase subsets to 1M passages
 rather than the full 8.8M-passage corpus — see `bench/phase3.md`'s own
 opening section for why.
+
+## Running Phase 4 (ranking cascade and heterogeneous serving)
+
+Needs the `rank` extra (`transformers`, `onnx`, `onnxruntime`,
+`onnxconverter-common`; `torch` already present via `dense`) and Phase 1's
+WAND run files for dev/dl19/dl20 (`uv run python -m baselines.cascade_bm25`
+if not already present, plus `--query-set dev` if that run is missing too).
+
+```bash
+uv sync --extra dense --extra rank
+```
+
+This machine has no CUDA GPU, so the GPU-bound half of this phase (the
+cross-encoder rank stage, batching sweep, precision comparison, queue
+discipline) runs on a Kaggle Notebook instead of locally — see
+`kaggle/README.md` for the upload/run steps. Everything else runs locally:
+
+```bash
+export PYTHONPATH=py
+uv run python -m rank.encode_candidates    # dense score + doc length features -> data/rank-dense-scores.jsonl
+# ... upload to Kaggle, run kaggle/phase4_driver.py there, download results ...
+uv run python -m rank.report               # -> bench/phase4.md, bench/plots/phase4-batching.png
+```
 
 ## Ground rules
 
