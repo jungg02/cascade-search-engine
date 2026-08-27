@@ -38,15 +38,23 @@ def export_onnx(model_name: str, onnx_path: Path) -> None:
     model.eval()
     dummy = tokenizer("dummy query", "dummy passage", return_tensors="pt")
     onnx_path.parent.mkdir(parents=True, exist_ok=True)
+    # token_type_ids is not optional for a BERT-family cross-encoder: it is
+    # the only input carrying the query/passage segment boundary (0 for query
+    # tokens, 1 for passage tokens). Exporting a 2-input graph makes ORT run
+    # the model with an all-zero segment embedding, which silently destroys
+    # the model's discriminative power rather than failing -- measured on a
+    # real pair, a relevant passage scores +7.4720 with token_type_ids and
+    # -0.4496 without it.
     torch.onnx.export(
         model,
-        (dummy["input_ids"], dummy["attention_mask"]),
+        (dummy["input_ids"], dummy["attention_mask"], dummy["token_type_ids"]),
         str(onnx_path),
-        input_names=["input_ids", "attention_mask"],
+        input_names=["input_ids", "attention_mask", "token_type_ids"],
         output_names=["logits"],
         dynamic_axes={
             "input_ids": {0: "batch", 1: "sequence"},
             "attention_mask": {0: "batch", 1: "sequence"},
+            "token_type_ids": {0: "batch", 1: "sequence"},
             "logits": {0: "batch"},
         },
         opset_version=17,
@@ -109,7 +117,14 @@ class CrossEncoderSession:
             )
             outputs = self._session.run(
                 ["logits"],
-                {"input_ids": encoded["input_ids"], "attention_mask": encoded["attention_mask"]},
+                {
+                    "input_ids": encoded["input_ids"],
+                    "attention_mask": encoded["attention_mask"],
+                    # A two-sequence tokenizer call already returns this; the
+                    # bug this replaces was discarding it, leaving the segment
+                    # embedding zeroed. See export_onnx's note.
+                    "token_type_ids": encoded["token_type_ids"],
+                },
             )
             scores.extend(float(x) for x in np.asarray(outputs[0]).reshape(-1))
         return scores
