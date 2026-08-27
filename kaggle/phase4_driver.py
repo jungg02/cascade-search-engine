@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import nest_asyncio
 import torch
 
 from harness.datasets import load_qrels, load_queries
@@ -39,10 +40,23 @@ from rank.prerank_mlp import (
     train_mlp,
 )
 
+# Kaggle (and Jupyter/Colab generally) runs each cell inside an already-active
+# asyncio event loop -- rank.crossencoder_harness's run_batching_sweep/
+# run_queue_discipline call asyncio.run(...) internally, which raises
+# "asyncio.run() cannot be called from a running event loop" in that
+# environment, even though the identical code runs fine as a plain script
+# (which is how Task 7's own tests exercise it) or under pytest (no loop
+# running there either). nest_asyncio.apply() patches the running loop to
+# tolerate the nested asyncio.run() call; applying it once here, before any
+# of this driver's functions run, is scoped to this Kaggle-only script rather
+# than added as a rank package dependency nothing else needs. Found on a real
+# Kaggle run: prerank succeeded, then run_batching() raised this immediately.
+nest_asyncio.apply()
+
 # Filled in by hand before uploading -- `git rev-parse HEAD` on this repo,
 # immediately before uploading this file. Kaggle has no git repo to read it
 # from; see this phase's design spec's "Kaggle provenance gap."
-SOURCE_GIT_SHA = "b08268d8e9785589255892c5acebdd7453fd7532"
+SOURCE_GIT_SHA = "7c601f5eeee332c12948b02508612ae25ad950a3"
 
 RESULTS_DIR = Path("bench/results")
 MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
