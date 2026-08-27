@@ -1752,11 +1752,14 @@ This task has no local "run it" step — it is written and reviewed here, then t
 2. Upload as a Kaggle Dataset (Add Data -> Upload), preserving this directory layout:
    - The whole `py/rank/` directory (all `.py` files, not `tests/`).
    - `py/harness/__init__.py`, `py/harness/histogram.py`, `py/harness/runmeta.py`,
-     `py/harness/datasets.py`, `py/harness/metrics.py`, and `py/harness/runfile.py`
-     (all five `harness` modules `phase4_driver.py` imports, directly or via
+     `py/harness/datasets.py`, `py/harness/metrics.py`, `py/harness/runfile.py`,
+     and `py/harness/loadgen.py`
+     (all six `harness` modules `phase4_driver.py` imports, directly or via
      `rank.crossencoder_harness`/`rank.prerank_mlp` — `datasets.py` is needed for
      `load_queries`/`load_qrels`, which pull from `ir_datasets`; `ir_datasets` itself
-     must also be installed on Kaggle: `!pip install ir_datasets`).
+     must also be installed on Kaggle: `!pip install ir_datasets`. `loadgen.py` is
+     the open-loop load generator `rank.crossencoder_harness`'s batching/queue
+     harness is built on).
    - `data/rank-dense-scores.jsonl` and `data/rank-candidate-texts.json`
      (from Task 2's local run).
    - `runs/cascade-wand.dev.txt`, `runs/cascade-wand.dl19.txt`, `runs/cascade-wand.dl20.txt`.
