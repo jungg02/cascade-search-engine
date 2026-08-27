@@ -742,8 +742,9 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'rank.batcher'`.
 """Dynamic-batching queue logic: accumulate requests until either
 max_batch_size or max_wait_ms is hit, whichever comes first. Pure given an
 injected clock, so the batching *decision* is unit-tested without any real
-async runtime or GPU -- crossencoder_harness.py wraps this in an asyncio
-loop that actually calls the model.
+concurrency or GPU -- crossencoder_harness.py wraps this in a flusher thread
+that actually calls the model, guarding every add/should_flush/flush call
+with its own lock (this class is deliberately not internally synchronized).
 """
 
 from __future__ import annotations
@@ -1071,7 +1072,7 @@ git commit -m "phase4: pre-rank MLP training and scoring"
 
 **Interfaces:**
 - Consumes: `rank.batcher.DynamicBatcher` (Task 5), `harness.histogram.LatencyRecorder`, `harness.runmeta.run_metadata`.
-- Produces: `export_onnx(model_name: str, onnx_path: Path) -> None`, `convert_to_fp16(fp32_path: Path, fp16_path: Path) -> None`, `quantize_int8(fp32_path: Path, int8_path: Path) -> None`, `CrossEncoderSession` class wrapping an ONNX Runtime `InferenceSession` with a `.score(pairs: list[tuple[str, str]]) -> list[float]` method, `run_batching_sweep(session_factory, grid: list[tuple[int, float]], request_pairs: list[tuple[str, str]]) -> list[dict]`, `run_queue_discipline(session_factory, discipline: str, arrival_rate: float, batcher_config: tuple[int, float], request_pairs: list[tuple[str, str]], duration_s: float) -> dict`. This module is a **Kaggle-scale driver** (needs a real GPU to be *fast*, not to be *correct* — every function here also runs correctly, just slowly, on CPU) and is **locally smoke-tested** at tiny scale in fp32-only, CPU-only mode (Step 4 below, which runs this task's test file — the tiny-scale smoke test IS the test suite here, not a separate step), matching Phase 3's `--limit`-flag precedent for validating an expensive driver's logic before the real run.
+- Produces: `export_onnx(model_name: str, onnx_path: Path) -> None`, `convert_to_fp16(fp32_path: Path, fp16_path: Path) -> None`, `quantize_int8(fp32_path: Path, int8_path: Path) -> None`, `CrossEncoderSession` class wrapping an ONNX Runtime `InferenceSession` with a `.score(pairs: list[tuple[str, str]]) -> list[float]` method, `run_batching_sweep(session_factory, grid: list[tuple[int, float]], request_pairs: list[tuple[str, str]], probe_requests: int) -> list[dict]`, `run_queue_discipline(session_factory, discipline: str, arrival_rate: float, batcher_config: tuple[int, float], request_pairs: list[tuple[str, str]], duration_s: float) -> dict`. Both drive `harness.loadgen.run_open_loop` (the same generator Phase 2 uses) against a dedicated flusher thread rather than an asyncio loop — see the module docstring for why a blocking `session.score()` sharing an event loop with its own arrival generator is closed-loop in all but name. `run_batching_sweep` takes a request *budget* (`probe_requests`) rather than a duration because it is a saturating probe: `run_open_loop` precomputes its whole arrival list and drains it, so a fire-hose bounded only by a duration runs for offered/capacity seconds. This module is a **Kaggle-scale driver** (needs a real GPU to be *fast*, not to be *correct* — every function here also runs correctly, just slowly, on CPU) and is **locally smoke-tested** at tiny scale in fp32-only, CPU-only mode (Step 4 below, which runs this task's test file — the tiny-scale smoke test IS the test suite here, not a separate step), matching Phase 3's `--limit`-flag precedent for validating an expensive driver's logic before the real run.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1086,15 +1087,19 @@ validates the same code path at a scale that fits in CI."""
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
+import onnx
 import pytest
 
-from rank.batcher import DynamicBatcher
 from rank.crossencoder_harness import (
     CrossEncoderSession,
+    convert_to_fp16,
     export_onnx,
+    quantize_int8,
     run_batching_sweep,
+    run_queue_discipline,
 )
 
 MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -1138,6 +1143,53 @@ def test_score_chunks_batches_larger_than_chunk_size(fp32_onnx_path: Path):
     assert chunked == pytest.approx(unchunked)
 
 
+def test_session_exposes_token_type_ids_input(fp32_onnx_path: Path):
+    session = CrossEncoderSession(fp32_onnx_path, MODEL_NAME, providers=["CPUExecutionProvider"])
+    input_names = [i.name for i in session._session.get_inputs()]
+    assert "token_type_ids" in input_names
+
+
+def test_session_scores_relevant_pair_above_floor(fp32_onnx_path: Path):
+    # Value-pinned regression test for the token_type_ids omission: verified
+    # by hand against real cross-encoder scores on this exact pair --
+    # broken (token_type_ids omitted) scores it -0.4496, correct scores it
+    # +7.4720. 5.0 separates cleanly from both. isinstance(score, float),
+    # which is all the older smoke test checked, passes either way (and
+    # would pass on NaN too), which is why this bug survived to review.
+    session = CrossEncoderSession(fp32_onnx_path, MODEL_NAME, providers=["CPUExecutionProvider"])
+    scores = session.score(
+        [("what is the capital of france",
+          "paris is the capital and most populous city of france")]
+    )
+    assert scores[0] > 5.0
+
+
+@pytest.mark.parametrize("precision", ["fp16", "int8"])
+def test_converted_models_keep_three_inputs_and_score_finitely(
+    fp32_onnx_path: Path, tmp_path: Path, precision: str
+):
+    # Neither conversion was covered by any test, and both rewrite the graph
+    # the token_type_ids fix just changed: float16 conversion must leave the
+    # *integer* inputs (input_ids/attention_mask/token_type_ids) alone, and
+    # dynamic int8 quantization must not drop the newly-added third input. A
+    # dropped or retyped token_type_ids would resurface exactly that bug in
+    # the precision half of this phase, where it is hardest to notice.
+    converted = tmp_path / f"model_{precision}.onnx"
+    (convert_to_fp16 if precision == "fp16" else quantize_int8)(fp32_onnx_path, converted)
+
+    graph_inputs = onnx.load(str(converted)).graph.input
+    assert [i.name for i in graph_inputs] == ["input_ids", "attention_mask", "token_type_ids"]
+    assert all(i.type.tensor_type.elem_type == onnx.TensorProto.INT64 for i in graph_inputs)
+
+    session = CrossEncoderSession(converted, MODEL_NAME, providers=["CPUExecutionProvider"])
+    score = session.score(
+        [("what is the capital of france",
+          "paris is the capital and most populous city of france")]
+    )[0]
+    assert math.isfinite(score)
+    assert score > 5.0
+
+
 def test_batching_sweep_tiny_grid(fp32_onnx_path: Path):
     session = CrossEncoderSession(fp32_onnx_path, MODEL_NAME, providers=["CPUExecutionProvider"])
     pairs = [("query text", f"passage number {i}") for i in range(6)]
@@ -1145,11 +1197,60 @@ def test_batching_sweep_tiny_grid(fp32_onnx_path: Path):
         session_factory=lambda: session,
         grid=[(1, 0.0), (4, 5.0)],
         request_pairs=pairs,
+        # A saturating probe's wall time is probe_requests/throughput, so the
+        # budget (not a duration) is what keeps this test to a few seconds on
+        # a CPU-only fixture model.
+        probe_requests=200,
+        warmup_requests=2,
     )
     assert len(points) == 2
     for point in points:
         assert "max_batch_size" in point and "max_wait_ms" in point
         assert "latency_us" in point and "throughput_qps" in point
+        assert point["throughput_qps"] > 0
+
+
+def test_queue_discipline_reports_achieved_qps_and_queue_delay(fp32_onnx_path: Path):
+    session = CrossEncoderSession(fp32_onnx_path, MODEL_NAME, providers=["CPUExecutionProvider"])
+    pairs = [("query text", f"passage number {i}") for i in range(6)]
+    result = run_queue_discipline(
+        session_factory=lambda: session,
+        discipline="unbounded",
+        arrival_rate_qps=200.0,
+        batcher_config=(4, 5.0),
+        request_pairs=pairs,
+        duration_s=0.5,
+        warmup_requests=2,
+    )
+    assert result["discipline"] == "unbounded"
+    assert result["achieved_qps"] > 0
+    assert "p99_us" in result["latency_us"]
+    assert "p99_us" in result["queue_delay_us"]
+    assert result["shed_count"] == 0
+
+
+def test_shed_discipline_actually_sheds_under_overload(fp32_onnx_path: Path):
+    # The regression test for I1 itself. Under the old closed-loop harness the
+    # arrival generator shared an event loop with the blocking scorer, so
+    # offered load throttled itself down to whatever the scorer permitted and
+    # the queue could never fill -- shed_count was structurally 0 (as it was
+    # in every committed rank-queue.json run), and this assertion could not
+    # have been made to pass locally at any arrival rate. With a genuinely
+    # open-loop generator, a depth-1 queue at 500 qps against a CPU-bound
+    # cross-encoder must shed.
+    session = CrossEncoderSession(fp32_onnx_path, MODEL_NAME, providers=["CPUExecutionProvider"])
+    pairs = [("query text", f"passage number {i}") for i in range(6)]
+    result = run_queue_discipline(
+        session_factory=lambda: session,
+        discipline="shed",
+        arrival_rate_qps=500.0,
+        batcher_config=(4, 5.0),
+        request_pairs=pairs,
+        duration_s=0.5,
+        max_queue_depth=1,
+        warmup_requests=2,
+    )
+    assert result["shed_count"] > 0
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1161,10 +1262,19 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'rank.crossencoder_harn
 
 ```python
 """Cross-encoder serving harness: ONNX export/precision variants, an
-in-process async dynamic-batching harness (no real network hop -- an
+in-process dynamic-batching harness (no real network hop -- harness.loadgen's
 open-loop request generator feeds rank.batcher.DynamicBatcher directly,
 matching the design spec's choice to keep this runnable inside one Kaggle
 notebook), and queue discipline (load-shedding vs. unbounded).
+
+The batching harness is thread-based, not asyncio-based, and that is load-
+bearing: session.score() is a blocking call with no await in it, so an
+asyncio generator sharing its event loop could never advance while a batch
+was being scored -- arrivals silently throttled to the scorer's own rate and
+the generator became closed-loop in everything but name (measured: a nominal
+1992 qps target achieved ~719 qps, and no run ever shed a single request).
+Scoring now runs on a dedicated flusher thread while harness.loadgen.
+run_open_loop drives arrivals off absolute, precomputed deadlines.
 
 INT8 is dynamic quantization (onnxruntime.quantization.quantize_dynamic) --
 no calibration dataset needed, simpler than static/calibrated quantization,
@@ -1178,8 +1288,9 @@ back to slower ops, that IS the finding to report.
 
 from __future__ import annotations
 
-import asyncio
+import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -1191,7 +1302,7 @@ from onnxconverter_common import float16
 from onnxruntime.quantization import QuantType, quantize_dynamic
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from harness.histogram import LatencyRecorder
+from harness.loadgen import LoadResult, run_open_loop
 
 
 def export_onnx(model_name: str, onnx_path: Path) -> None:
@@ -1200,15 +1311,23 @@ def export_onnx(model_name: str, onnx_path: Path) -> None:
     model.eval()
     dummy = tokenizer("dummy query", "dummy passage", return_tensors="pt")
     onnx_path.parent.mkdir(parents=True, exist_ok=True)
+    # token_type_ids is not optional for a BERT-family cross-encoder: it is
+    # the only input carrying the query/passage segment boundary (0 for query
+    # tokens, 1 for passage tokens). Exporting a 2-input graph makes ORT run
+    # the model with an all-zero segment embedding, which silently destroys
+    # the model's discriminative power rather than failing -- measured on a
+    # real pair, a relevant passage scores +7.4720 with token_type_ids and
+    # -0.4496 without it.
     torch.onnx.export(
         model,
-        (dummy["input_ids"], dummy["attention_mask"]),
+        (dummy["input_ids"], dummy["attention_mask"], dummy["token_type_ids"]),
         str(onnx_path),
-        input_names=["input_ids", "attention_mask"],
+        input_names=["input_ids", "attention_mask", "token_type_ids"],
         output_names=["logits"],
         dynamic_axes={
             "input_ids": {0: "batch", 1: "sequence"},
             "attention_mask": {0: "batch", 1: "sequence"},
+            "token_type_ids": {0: "batch", 1: "sequence"},
             "logits": {0: "batch"},
         },
         opset_version=17,
@@ -1271,93 +1390,216 @@ class CrossEncoderSession:
             )
             outputs = self._session.run(
                 ["logits"],
-                {"input_ids": encoded["input_ids"], "attention_mask": encoded["attention_mask"]},
+                {
+                    "input_ids": encoded["input_ids"],
+                    "attention_mask": encoded["attention_mask"],
+                    # A two-sequence tokenizer call already returns this; the
+                    # bug this replaces was discarding it, leaving the segment
+                    # embedding zeroed. See export_onnx's note.
+                    "token_type_ids": encoded["token_type_ids"],
+                },
             )
             scores.extend(float(x) for x in np.asarray(outputs[0]).reshape(-1))
         return scores
 
 
-async def _run_open_loop(
+class _QueueFullError(Exception):
+    """Raised by dispatch() under the shed discipline when the batcher is at
+    capacity. run_open_loop's own dispatch wrapper catches any exception and
+    counts it as a LoadResult error rather than aborting the run, which is
+    exactly what "shed" should mean -- but sheds are counted explicitly here
+    too (see _BatchedRun.shed_count), because result.errors would also absorb
+    a genuine scoring failure and let a broken run masquerade as successful
+    load-shedding."""
+
+
+class _ScorerFailed(Exception):
+    """Raised by dispatch() once the flusher thread has died, so in-flight and
+    subsequent arrivals fail fast instead of blocking forever on an Event that
+    nothing will ever set."""
+
+
+@dataclass
+class _BatchedRun:
+    """One open-loop run's outcome: harness.loadgen's own LoadResult plus the
+    shed count, which loadgen has no concept of."""
+
+    result: LoadResult
+    shed_count: int
+
+
+def _run_batched_open_loop(
     session,
     batcher_factory: Callable[[], "DynamicBatcher"],
     request_pairs: list[tuple[str, str]],
     duration_s: float,
-    arrival_interval_s: float,
-    on_shed: Callable[[], None] | None = None,
+    qps: float,
+    workers: int,
     max_queue_depth: int | None = None,
-) -> LatencyRecorder:
+    warmup_requests: int = 0,
+) -> _BatchedRun:
+    """Drive `session` through one shared DynamicBatcher using harness.loadgen's
+    real open-loop generator: arrivals run on their own schedule regardless of
+    how long a batch takes to score, because session.score() runs on a
+    dedicated flusher thread, not on the generator's critical path. Each
+    dispatched request enqueues itself into the batcher and blocks on its own
+    threading.Event until the flusher scores its batch and wakes it -- this is
+    what lets run_open_loop's scheduled/start/done timestamps stay meaningful
+    (queue_delay = start - scheduled genuinely reflects batcher/queue wait, not
+    an artifact of a stalled event loop).
+
+    Concurrency contract, since getting this wrong deadlocks rather than fails:
+      * `lock` guards the batcher, the shed counter and the round-robin index,
+        and nothing else. It is never held across session.score() -- the flush
+        happens under the lock, the scoring does not.
+      * A request's Event travels *inside* the batched item, so the flusher
+        only ever wakes events it was handed. There is no shared id->event map
+        for the two sides to race over.
+      * If session.score() raises, the flusher records the exception, wakes
+        every request it is holding, and keeps draining-and-waking until stop
+        is set, so no dispatch thread can block forever. dispatch() then fails
+        fast, run_open_loop returns, and the original exception is re-raised
+        here rather than surfacing as a silent hang.
+    """
     from rank.batcher import DynamicBatcher  # local import avoids a hard cycle at module load
 
     batcher: DynamicBatcher = batcher_factory()
-    recorder = LatencyRecorder()
-    pending: dict[int, float] = {}
-    next_id = 0
-    start = time.perf_counter()
-    request_index = 0
+    lock = threading.Lock()
+    stop = threading.Event()
+    failure: list[BaseException] = []
+    counters = {"shed": 0, "next_index": 0}
 
-    async def generator():
-        nonlocal next_id, request_index
-        while time.perf_counter() - start < duration_s:
+    def flusher() -> None:
+        while not stop.is_set():
+            with lock:
+                batch = batcher.flush() if batcher.should_flush() else None
+            if not batch:
+                time.sleep(0.0005)
+                continue
+            try:
+                scores = session.score([pair for _, pair in batch])
+                assert len(scores) == len(batch)
+            except BaseException as exc:  # noqa: BLE001 -- re-raised by the caller
+                failure.append(exc)
+                for event, _ in batch:
+                    event.set()
+                # Keep releasing whatever arrives until the run is torn down:
+                # dispatch() is failing fast by now, but requests already
+                # enqueued (or enqueued in the race window) still need waking.
+                while not stop.is_set():
+                    with lock:
+                        orphans = batcher.flush()
+                    for event, _ in orphans:
+                        event.set()
+                    time.sleep(0.0005)
+                return
+            for event, _ in batch:
+                event.set()
+
+    flusher_thread = threading.Thread(target=flusher, daemon=True)
+    flusher_thread.start()
+
+    def dispatch(_query: str) -> None:
+        # _query (the Zipf-sampled text run_open_loop hands us) is not used to
+        # pick the pair -- request_pairs is round-robined independently under
+        # the lock, since real pair identity for this synthetic benchmark
+        # workload doesn't need to correlate with the sampler's popularity
+        # draw, only arrival *timing* does.
+        if failure:
+            raise _ScorerFailed()
+        event = threading.Event()
+        with lock:
             if max_queue_depth is not None and len(batcher) >= max_queue_depth:
-                if on_shed is not None:
-                    on_shed()
-            else:
-                pending[next_id] = time.perf_counter()
-                batcher.add((next_id, request_pairs[request_index % len(request_pairs)]))
-                next_id += 1
-                request_index += 1
-            await asyncio.sleep(arrival_interval_s)
+                counters["shed"] += 1
+                raise _QueueFullError()
+            pair = request_pairs[counters["next_index"] % len(request_pairs)]
+            counters["next_index"] += 1
+            batcher.add((event, pair))
+        event.wait()
+        if failure:
+            raise _ScorerFailed()
 
-    async def consumer():
-        while time.perf_counter() - start < duration_s + batcher.max_wait_ms / 1000.0:
-            if batcher.should_flush():
-                batch = batcher.flush()
-                ids = [item[0] for item in batch]
-                pairs = [item[1] for item in batch]
-                scores = session.score(pairs)
-                assert len(scores) == len(pairs)
-                now = time.perf_counter()
-                for request_id in ids:
-                    recorder.record((now - pending.pop(request_id)) * 1_000_000)
-            await asyncio.sleep(0.001)
+    try:
+        for _ in range(warmup_requests):
+            dispatch("warmup")
+        result = run_open_loop(
+            dispatch=dispatch,
+            queries=[q for q, _ in request_pairs],
+            qps=qps,
+            duration_s=duration_s,
+            workers=workers,
+        )
+    finally:
+        stop.set()
+        flusher_thread.join(timeout=5.0)
+    # Checked after the finally block (so it can't mask an in-flight
+    # exception) and raised rather than ignored: a flusher that outlives its
+    # run is a daemon thread still holding an ONNX Runtime session while the
+    # interpreter tears down, which surfaces later as an unrelated-looking
+    # native crash. Fail loudly here instead.
+    if flusher_thread.is_alive():
+        raise RuntimeError("flusher thread did not stop within 5s of the run ending")
+    if failure:
+        raise failure[0]
+    return _BatchedRun(result=result, shed_count=counters["shed"])
 
-    await asyncio.gather(generator(), consumer())
-    return recorder
+
+# Requests offered per batching-sweep probe. The probe is a saturating burst:
+# qps is set far above any config's plausible throughput, so what the offered
+# rate actually buys is "every request is already waiting", and achieved_qps
+# becomes that config's real sustained throughput. The *budget* has to be the
+# bounded quantity rather than the rate, because run_open_loop precomputes the
+# whole arrival list up front and its ThreadPoolExecutor drains every submitted
+# request before returning -- a fire-hose bounded only by duration_s runs for
+# offered_requests/capacity seconds (at 100k qps for 10s: hours), not for
+# duration_s. Bounding the budget instead terminates in budget/capacity
+# seconds, identically on this repo's CPU fixture and on a Kaggle T4, with no
+# hardware-specific rate guess baked in. Consequence, stated where it can't be
+# missed: under a saturating probe the sweep's p99 is drain-dominated --
+# comparable across configs at equal budget, but not an absolute client-side
+# latency. The queue-discipline experiment below, which offers a real specified
+# arrival rate, is where latency/queue_delay are absolute numbers.
+DEFAULT_PROBE_REQUESTS = 2000
+_SATURATING_QPS = 100_000.0
 
 
 def run_batching_sweep(
     session_factory: Callable[[], CrossEncoderSession],
     grid: list[tuple[int, float]],
     request_pairs: list[tuple[str, str]],
-    duration_s: float = 2.0,
+    probe_requests: int = DEFAULT_PROBE_REQUESTS,
+    warmup_requests: int = 20,
 ) -> list[dict]:
     from rank.batcher import DynamicBatcher
 
     session = session_factory()
     points = []
     for max_batch_size, max_wait_ms in grid:
-        recorder = asyncio.run(
-            _run_open_loop(
-                session,
-                # DynamicBatcher's clock contract is milliseconds (its
-                # max_wait_ms comparison assumes clock() ticks in ms) --
-                # time.perf_counter() ticks in seconds, so it must be scaled
-                # here or a "5ms" wait budget silently becomes 5 seconds.
-                batcher_factory=lambda: DynamicBatcher(
-                    max_batch_size, max_wait_ms, lambda: time.perf_counter() * 1000.0
-                ),
-                request_pairs=request_pairs,
-                duration_s=duration_s,
-                arrival_interval_s=0.001,
-            )
+        run = _run_batched_open_loop(
+            session,
+            # DynamicBatcher's clock contract is milliseconds (its max_wait_ms
+            # comparison assumes clock() ticks in ms) -- time.perf_counter()
+            # ticks in seconds, so it must be scaled here or a "5ms" wait
+            # budget silently becomes 5 seconds.
+            batcher_factory=lambda: DynamicBatcher(
+                max_batch_size, max_wait_ms, lambda: time.perf_counter() * 1000.0
+            ),
+            request_pairs=request_pairs,
+            duration_s=probe_requests / _SATURATING_QPS,
+            qps=_SATURATING_QPS,
+            # Sized well above max_batch_size so the thread pool is never what
+            # stops a batch from filling -- the batcher's own max_batch_size/
+            # max_wait_ms must be the only thing shaping throughput.
+            workers=max(max_batch_size * 8, 64),
+            warmup_requests=warmup_requests,
         )
-        summary = recorder.summary()
+        summary = run.result.summary()
         points.append(
             {
                 "max_batch_size": max_batch_size,
                 "max_wait_ms": max_wait_ms,
-                "latency_us": summary,
-                "throughput_qps": summary.get("count", 0) / duration_s,
+                "latency_us": summary["latency"],
+                "throughput_qps": run.result.achieved_qps,
             }
         )
     return points
@@ -1371,37 +1613,39 @@ def run_queue_discipline(
     request_pairs: list[tuple[str, str]],
     duration_s: float = 2.0,
     max_queue_depth: int = 64,
+    warmup_requests: int = 20,
 ) -> dict:
     from rank.batcher import DynamicBatcher
 
     session = session_factory()
     max_batch_size, max_wait_ms = batcher_config
-    shed_count = 0
+    # Generously sized so the thread pool is never the binding constraint --
+    # only the batcher's max_queue_depth (shed) or real scorer throughput
+    # (unbounded) should be able to cause backlog/shedding.
+    workers = max(max_queue_depth * 4, 256)
 
-    def on_shed():
-        nonlocal shed_count
-        shed_count += 1
-
-    recorder = asyncio.run(
-        _run_open_loop(
-            session,
-            # See run_batching_sweep's comment: DynamicBatcher expects a
-            # millisecond clock, not seconds.
-            batcher_factory=lambda: DynamicBatcher(
-                max_batch_size, max_wait_ms, lambda: time.perf_counter() * 1000.0
-            ),
-            request_pairs=request_pairs,
-            duration_s=duration_s,
-            arrival_interval_s=1.0 / arrival_rate_qps,
-            on_shed=on_shed if discipline == "shed" else None,
-            max_queue_depth=max_queue_depth if discipline == "shed" else None,
-        )
+    run = _run_batched_open_loop(
+        session,
+        # See run_batching_sweep's comment: DynamicBatcher expects a
+        # millisecond clock, not seconds.
+        batcher_factory=lambda: DynamicBatcher(
+            max_batch_size, max_wait_ms, lambda: time.perf_counter() * 1000.0
+        ),
+        request_pairs=request_pairs,
+        duration_s=duration_s,
+        qps=arrival_rate_qps,
+        workers=workers,
+        max_queue_depth=max_queue_depth if discipline == "shed" else None,
+        warmup_requests=warmup_requests,
     )
+    summary = run.result.summary()
     return {
         "discipline": discipline,
         "arrival_rate_qps": arrival_rate_qps,
-        "latency_us": recorder.summary(),
-        "shed_count": shed_count,
+        "achieved_qps": run.result.achieved_qps,
+        "latency_us": summary["latency"],
+        "queue_delay_us": summary["queue_delay"],
+        "shed_count": run.shed_count,
     }
 ```
 
@@ -1472,16 +1716,12 @@ This task has no local "run it" step — it is written and reviewed here, then t
 4. In a notebook cell:
    ```bash
    !pip uninstall -y onnxruntime  # Kaggle images may preinstall the CPU build
-   !pip install onnxruntime-gpu onnxconverter-common nest_asyncio
+   !pip install onnxruntime-gpu onnxconverter-common
    ```
-   `nest_asyncio` is required because Kaggle (like Jupyter/Colab generally)
-   runs each cell inside an already-active asyncio event loop --
-   `phase4_driver.py` calls `nest_asyncio.apply()` at import time
-   specifically to let its `asyncio.run(...)` calls (inside
-   `rank.crossencoder_harness`'s batching/queue-discipline harness) work
-   there; without it, `run_batching()` fails with `RuntimeError:
-   asyncio.run() cannot be called from a running event loop` immediately
-   after prerank succeeds.
+   No `nest_asyncio` (an earlier version of this driver needed it): the
+   batching/queue-discipline harness in `rank.crossencoder_harness` is
+   thread-based and no longer calls `asyncio.run(...)`, so Kaggle's
+   already-active event loop is no longer in the way.
 5. Before running, edit `kaggle/phase4_driver.py`'s `SOURCE_GIT_SHA` constant
    — run `git rev-parse HEAD` locally and paste the result in, since Kaggle
    has no git repo to read it from (see this phase's design spec, "Kaggle
@@ -1513,7 +1753,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import nest_asyncio
 import torch
 
 from harness.datasets import load_qrels, load_queries
@@ -1539,23 +1778,10 @@ from rank.prerank_mlp import (
     train_mlp,
 )
 
-# Kaggle (and Jupyter/Colab generally) runs each cell inside an already-active
-# asyncio event loop -- rank.crossencoder_harness's run_batching_sweep/
-# run_queue_discipline call asyncio.run(...) internally, which raises
-# "asyncio.run() cannot be called from a running event loop" in that
-# environment, even though the identical code runs fine as a plain script
-# (which is how Task 7's own tests exercise it) or under pytest (no loop
-# running there either). nest_asyncio.apply() patches the running loop to
-# tolerate the nested asyncio.run() call; applying it once here, before any
-# of this driver's functions run, is scoped to this Kaggle-only script rather
-# than added as a rank package dependency nothing else needs. Found on a real
-# Kaggle run: prerank succeeded, then run_batching() raised this immediately.
-nest_asyncio.apply()
-
 # Filled in by hand before uploading -- `git rev-parse HEAD` on this repo,
 # immediately before uploading this file. Kaggle has no git repo to read it
 # from; see this phase's design spec's "Kaggle provenance gap."
-SOURCE_GIT_SHA = "REPLACE_ME_BEFORE_UPLOADING"
+SOURCE_GIT_SHA = "7c601f5eeee332c12948b02508612ae25ad950a3"
 
 RESULTS_DIR = Path("bench/results")
 MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -1568,6 +1794,20 @@ BATCHING_GRID = [
 ]
 QUEUE_DISCIPLINES = ("shed", "unbounded")
 QUEUE_OVERLOAD_MULTIPLIERS = (1.5, 2.0, 3.0)
+
+# Requests offered per batching-sweep grid point. run_batching_sweep is a
+# saturating probe, so its wall time is probe_requests/throughput, not a fixed
+# duration -- 5000 is a few seconds per point at plausible T4 throughput while
+# still giving the slowest config (max_batch_size=1) a bounded run. See
+# rank.crossencoder_harness.DEFAULT_PROBE_REQUESTS for the full reasoning.
+PROBE_REQUESTS = 5000
+
+# How many pairs the synthetic request stream cycles through. Built from real
+# dl19/dl20 queries and real candidate passages (see build_request_pairs) so
+# batching pads realistically -- 256 copies of one fixed-length string, which
+# this used to use, makes every batch uniform and hides the padding cost that
+# max_batch_size is supposed to trade against.
+REQUEST_PAIR_COUNT = 256
 
 
 def kaggle_hardware_info() -> dict:
@@ -1599,6 +1839,21 @@ def write_result(name: str, payload: dict) -> None:
 
 def load_candidate_texts() -> dict[str, str]:
     return json.loads(Path("data/rank-candidate-texts.json").read_text())
+
+
+def build_request_pairs(candidate_texts: dict[str, str]) -> list[tuple[str, str]]:
+    """The (query, passage) stream the batching/precision/queue experiments
+    replay. Real queries and real candidate passages, not synthetic
+    fixed-length placeholders: the tokenized length variance across the real
+    corpus is exactly what dynamic batching has to pad over, so a uniform
+    synthetic workload would report a padding cost of zero."""
+    queries = {**load_queries("dl19"), **load_queries("dl20")}
+    query_list = list(queries.values())
+    docids = list(candidate_texts)
+    return [
+        (query_list[i % len(query_list)], candidate_texts[docids[i % len(docids)]])
+        for i in range(REQUEST_PAIR_COUNT)
+    ]
 
 
 def run_prerank_and_consistency() -> dict:
@@ -1700,7 +1955,7 @@ def run_prerank_and_consistency() -> dict:
     }
 
 
-def run_batching() -> list[dict]:
+def run_batching(request_pairs: list[tuple[str, str]]) -> list[dict]:
     onnx_dir = Path("onnx_models")
     fp32_path = onnx_dir / "model_fp32.onnx"
     # Created once (not a factory that builds a fresh session per call) so
@@ -1709,9 +1964,10 @@ def run_batching() -> list[dict]:
     # session_factory once internally anyway, so this changes nothing about
     # the sweep itself, only makes the session inspectable afterward.
     session = CrossEncoderSession(fp32_path, MODEL_NAME, providers=["CUDAExecutionProvider"])
-    request_pairs = [("what does this query mean", f"candidate passage {i}") for i in range(256)]
 
-    points = run_batching_sweep(lambda: session, BATCHING_GRID, request_pairs, duration_s=10.0)
+    points = run_batching_sweep(
+        lambda: session, BATCHING_GRID, request_pairs, probe_requests=PROBE_REQUESTS
+    )
     write_result(
         "batching",
         {
@@ -1748,6 +2004,7 @@ def run_precision(
     survivors_by_qid: dict[str, set[str]],
     candidate_texts: dict[str, str],
     cascade_ndcg_10_fp32: float,
+    request_pairs: list[tuple[str, str]],
 ) -> None:
     onnx_dir = Path("onnx_models")
     fp32_path = onnx_dir / "model_fp32.onnx"
@@ -1756,13 +2013,17 @@ def run_precision(
     convert_to_fp16(fp32_path, fp16_path)
     quantize_int8(fp32_path, int8_path)
 
-    request_pairs = [("what does this query mean", f"candidate passage {i}") for i in range(256)]
     max_batch_size, max_wait_ms = best_setting
     results = {}
     for precision, path in (("fp32", fp32_path), ("fp16", fp16_path), ("int8", int8_path)):
         session = CrossEncoderSession(path, MODEL_NAME, providers=["CUDAExecutionProvider"])
         session_factory = lambda s=session: s
-        points = run_batching_sweep(session_factory, [(max_batch_size, max_wait_ms)], request_pairs, duration_s=10.0)
+        points = run_batching_sweep(
+            session_factory,
+            [(max_batch_size, max_wait_ms)],
+            request_pairs,
+            probe_requests=PROBE_REQUESTS,
+        )
 
         precision_run = score_survivors_with_session(session, survivors_by_qid, candidate_texts)
         # recall_k matches CROSS_ENCODER_K for the same reason as
@@ -1787,13 +2048,16 @@ def run_precision(
     )
 
 
-def run_queue_disciplines(best_setting: tuple[int, float], baseline_throughput_qps: float) -> None:
+def run_queue_disciplines(
+    best_setting: tuple[int, float],
+    baseline_throughput_qps: float,
+    request_pairs: list[tuple[str, str]],
+) -> None:
     onnx_dir = Path("onnx_models")
     fp32_path = onnx_dir / "model_fp32.onnx"
     # Created once, reused across all 6 discipline/multiplier runs -- same
     # reasoning as run_batching() above.
     session = CrossEncoderSession(fp32_path, MODEL_NAME, providers=["CUDAExecutionProvider"])
-    request_pairs = [("what does this query mean", f"candidate passage {i}") for i in range(256)]
 
     runs = []
     for discipline in QUEUE_DISCIPLINES:
@@ -1818,7 +2082,11 @@ def main() -> None:
         "fill in SOURCE_GIT_SHA from a local `git rev-parse HEAD` before running on Kaggle"
     )
     prerank_state = run_prerank_and_consistency()
-    batching_points = run_batching()
+    # Built once and threaded through all three serving experiments, so
+    # batching, precision and queue discipline are all measured against the
+    # same real request stream rather than three separate placeholder lists.
+    request_pairs = build_request_pairs(prerank_state["candidate_texts"])
+    batching_points = run_batching(request_pairs)
     best_point = max(batching_points, key=lambda p: p["throughput_qps"])
     best_setting = (best_point["max_batch_size"], best_point["max_wait_ms"])
     run_precision(
@@ -1827,8 +2095,13 @@ def main() -> None:
         survivors_by_qid=prerank_state["survivors_by_qid"],
         candidate_texts=prerank_state["candidate_texts"],
         cascade_ndcg_10_fp32=prerank_state["cascade_ndcg_10_fp32"],
+        request_pairs=request_pairs,
     )
-    run_queue_disciplines(best_setting, baseline_throughput_qps=best_point["throughput_qps"])
+    run_queue_disciplines(
+        best_setting,
+        baseline_throughput_qps=best_point["throughput_qps"],
+        request_pairs=request_pairs,
+    )
 
 
 if __name__ == "__main__":
@@ -1878,6 +2151,14 @@ RESULTS_DIR = REPO_ROOT / "bench" / "results"
 PLOTS_DIR = REPO_ROOT / "bench" / "plots"
 BENCH_DIR = REPO_ROOT / "bench"
 
+# Phase 1's own first-stage baseline over the same 97 dl19+dl20 queries this
+# phase's prerank-consistency section evaluates against -- pooled from
+# bench/phase1.md's per-set NDCG@10 (dl19 0.5052 / 43 queries, dl20 0.4785 /
+# 54 queries): (43*0.5052 + 54*0.4785) / 97. Phase 1 is historical and fixed,
+# not re-derived from its rerun, so this is a constant rather than something
+# read from bench/phase1.md at render time.
+PHASE1_BASELINE_NDCG_10 = 0.4903
+
 
 def render_batching_plot(batching: dict, output_path: Path) -> None:
     points = batching["points"]
@@ -1912,27 +2193,37 @@ def render_batching_table(batching: dict) -> str:
 
 
 def render_precision_table(precision: dict) -> str:
+    # p999 and max, not just p99: the real fp16 run's p999/max were ~10x its
+    # own p99 (244ms/252ms against a ~25ms p99), a tail entirely invisible in
+    # a p99-only table. .get(..., 0) rather than direct indexing so a
+    # rank-precision.json written before these keys existed still renders.
     lines = [
-        "| precision | throughput (qps) | p99 (ms) | cascade NDCG@10 | delta vs. fp32 |",
-        "|---|---|---|---|---|",
+        "| precision | throughput (qps) | p99 (ms) | p999 (ms) | max (ms) | cascade NDCG@10 | delta vs. fp32 |",
+        "|---|---|---|---|---|---|---|",
     ]
     for name, row in precision["results"].items():
         lines.append(
             f"| {name} | {row['throughput_qps']:.1f} | {row['latency_us']['p99_us']/1000:.2f} | "
+            f"{row['latency_us'].get('p999_us', 0)/1000:.2f} | {row['latency_us'].get('max_us', 0)/1000:.2f} | "
             f"{row['cascade_ndcg_10']:.4f} | {row['ndcg_10_delta_vs_fp32']:+.4f} |"
         )
     return "\n".join(lines)
 
 
 def render_queue_table(queue: dict) -> str:
+    # achieved_qps next to the arrival rate is the whole point of an open-loop
+    # generator: the gap between offered and achieved is the backlog, and
+    # queue_delay p99 says how much of the client-visible latency it cost.
     lines = [
-        "| discipline | arrival rate (qps) | p99 (ms) | shed count |",
-        "|---|---|---|---|",
+        "| discipline | arrival rate (qps) | achieved (qps) | p99 (ms) | queue delay p99 (ms) | shed count |",
+        "|---|---|---|---|---|---|",
     ]
     for row in queue["runs"]:
         lines.append(
             f"| {row['discipline']} | {row['arrival_rate_qps']:.1f} | "
-            f"{row['latency_us'].get('p99_us', 0)/1000:.2f} | {row['shed_count']} |"
+            f"{row.get('achieved_qps', 0):.1f} | "
+            f"{row['latency_us'].get('p99_us', 0)/1000:.2f} | "
+            f"{row.get('queue_delay_us', {}).get('p99_us', 0)/1000:.2f} | {row['shed_count']} |"
         )
     return "\n".join(lines)
 
@@ -1956,10 +2247,14 @@ def render_provider_warning(prerank: dict, batching: dict, precision: dict, queu
         },
         "queue discipline": queue.get("active_providers", []),
     }
+    # No `providers and ...` guard: a missing/empty active_providers field is
+    # not evidence the run used CUDA, it is evidence the run didn't record
+    # what it used -- which is exactly the silent-fallback case this check
+    # exists to catch, so it must fire rather than pass.
     fell_back = {
         name: providers
         for name, providers in checks.items()
-        if providers and "CUDAExecutionProvider" not in providers
+        if "CUDAExecutionProvider" not in providers
     }
     if not fell_back:
         return "All sub-experiments ran on `CUDAExecutionProvider` as requested."
@@ -1994,6 +2289,8 @@ Of the true top-{prerank['top_k_survivors']} under the full cross-encoder
 ranker, **{prerank['mean_prerank_consistency']:.1%}** survive pre-ranking
 (mean over {prerank['num_queries']} dl19+dl20 queries). Full-cascade result:
 NDCG@10 = {prerank['cascade_ndcg_10']:.4f}, recall@100 = {prerank['cascade_recall_100']:.4f}.
+Phase 1's own first-stage (lexical-only) baseline over the same 97
+queries: NDCG@10 = {PHASE1_BASELINE_NDCG_10:.4f}.
 
 ## Dynamic batching: throughput vs. p99 latency
 
