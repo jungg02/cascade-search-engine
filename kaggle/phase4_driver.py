@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import nest_asyncio
 import torch
 
 from harness.datasets import load_qrels, load_queries
@@ -40,19 +39,6 @@ from rank.prerank_mlp import (
     train_mlp,
 )
 
-# Kaggle (and Jupyter/Colab generally) runs each cell inside an already-active
-# asyncio event loop -- rank.crossencoder_harness's run_batching_sweep/
-# run_queue_discipline call asyncio.run(...) internally, which raises
-# "asyncio.run() cannot be called from a running event loop" in that
-# environment, even though the identical code runs fine as a plain script
-# (which is how Task 7's own tests exercise it) or under pytest (no loop
-# running there either). nest_asyncio.apply() patches the running loop to
-# tolerate the nested asyncio.run() call; applying it once here, before any
-# of this driver's functions run, is scoped to this Kaggle-only script rather
-# than added as a rank package dependency nothing else needs. Found on a real
-# Kaggle run: prerank succeeded, then run_batching() raised this immediately.
-nest_asyncio.apply()
-
 # Filled in by hand before uploading -- `git rev-parse HEAD` on this repo,
 # immediately before uploading this file. Kaggle has no git repo to read it
 # from; see this phase's design spec's "Kaggle provenance gap."
@@ -69,6 +55,20 @@ BATCHING_GRID = [
 ]
 QUEUE_DISCIPLINES = ("shed", "unbounded")
 QUEUE_OVERLOAD_MULTIPLIERS = (1.5, 2.0, 3.0)
+
+# Requests offered per batching-sweep grid point. run_batching_sweep is a
+# saturating probe, so its wall time is probe_requests/throughput, not a fixed
+# duration -- 5000 is a few seconds per point at plausible T4 throughput while
+# still giving the slowest config (max_batch_size=1) a bounded run. See
+# rank.crossencoder_harness.DEFAULT_PROBE_REQUESTS for the full reasoning.
+PROBE_REQUESTS = 5000
+
+# How many pairs the synthetic request stream cycles through. Built from real
+# dl19/dl20 queries and real candidate passages (see build_request_pairs) so
+# batching pads realistically -- 256 copies of one fixed-length string, which
+# this used to use, makes every batch uniform and hides the padding cost that
+# max_batch_size is supposed to trade against.
+REQUEST_PAIR_COUNT = 256
 
 
 def kaggle_hardware_info() -> dict:
@@ -100,6 +100,21 @@ def write_result(name: str, payload: dict) -> None:
 
 def load_candidate_texts() -> dict[str, str]:
     return json.loads(Path("data/rank-candidate-texts.json").read_text())
+
+
+def build_request_pairs(candidate_texts: dict[str, str]) -> list[tuple[str, str]]:
+    """The (query, passage) stream the batching/precision/queue experiments
+    replay. Real queries and real candidate passages, not synthetic
+    fixed-length placeholders: the tokenized length variance across the real
+    corpus is exactly what dynamic batching has to pad over, so a uniform
+    synthetic workload would report a padding cost of zero."""
+    queries = {**load_queries("dl19"), **load_queries("dl20")}
+    query_list = list(queries.values())
+    docids = list(candidate_texts)
+    return [
+        (query_list[i % len(query_list)], candidate_texts[docids[i % len(docids)]])
+        for i in range(REQUEST_PAIR_COUNT)
+    ]
 
 
 def run_prerank_and_consistency() -> dict:
@@ -201,7 +216,7 @@ def run_prerank_and_consistency() -> dict:
     }
 
 
-def run_batching() -> list[dict]:
+def run_batching(request_pairs: list[tuple[str, str]]) -> list[dict]:
     onnx_dir = Path("onnx_models")
     fp32_path = onnx_dir / "model_fp32.onnx"
     # Created once (not a factory that builds a fresh session per call) so
@@ -210,9 +225,10 @@ def run_batching() -> list[dict]:
     # session_factory once internally anyway, so this changes nothing about
     # the sweep itself, only makes the session inspectable afterward.
     session = CrossEncoderSession(fp32_path, MODEL_NAME, providers=["CUDAExecutionProvider"])
-    request_pairs = [("what does this query mean", f"candidate passage {i}") for i in range(256)]
 
-    points = run_batching_sweep(lambda: session, BATCHING_GRID, request_pairs, duration_s=10.0)
+    points = run_batching_sweep(
+        lambda: session, BATCHING_GRID, request_pairs, probe_requests=PROBE_REQUESTS
+    )
     write_result(
         "batching",
         {
@@ -249,6 +265,7 @@ def run_precision(
     survivors_by_qid: dict[str, set[str]],
     candidate_texts: dict[str, str],
     cascade_ndcg_10_fp32: float,
+    request_pairs: list[tuple[str, str]],
 ) -> None:
     onnx_dir = Path("onnx_models")
     fp32_path = onnx_dir / "model_fp32.onnx"
@@ -257,13 +274,17 @@ def run_precision(
     convert_to_fp16(fp32_path, fp16_path)
     quantize_int8(fp32_path, int8_path)
 
-    request_pairs = [("what does this query mean", f"candidate passage {i}") for i in range(256)]
     max_batch_size, max_wait_ms = best_setting
     results = {}
     for precision, path in (("fp32", fp32_path), ("fp16", fp16_path), ("int8", int8_path)):
         session = CrossEncoderSession(path, MODEL_NAME, providers=["CUDAExecutionProvider"])
         session_factory = lambda s=session: s
-        points = run_batching_sweep(session_factory, [(max_batch_size, max_wait_ms)], request_pairs, duration_s=10.0)
+        points = run_batching_sweep(
+            session_factory,
+            [(max_batch_size, max_wait_ms)],
+            request_pairs,
+            probe_requests=PROBE_REQUESTS,
+        )
 
         precision_run = score_survivors_with_session(session, survivors_by_qid, candidate_texts)
         # recall_k matches CROSS_ENCODER_K for the same reason as
@@ -288,13 +309,16 @@ def run_precision(
     )
 
 
-def run_queue_disciplines(best_setting: tuple[int, float], baseline_throughput_qps: float) -> None:
+def run_queue_disciplines(
+    best_setting: tuple[int, float],
+    baseline_throughput_qps: float,
+    request_pairs: list[tuple[str, str]],
+) -> None:
     onnx_dir = Path("onnx_models")
     fp32_path = onnx_dir / "model_fp32.onnx"
     # Created once, reused across all 6 discipline/multiplier runs -- same
     # reasoning as run_batching() above.
     session = CrossEncoderSession(fp32_path, MODEL_NAME, providers=["CUDAExecutionProvider"])
-    request_pairs = [("what does this query mean", f"candidate passage {i}") for i in range(256)]
 
     runs = []
     for discipline in QUEUE_DISCIPLINES:
@@ -319,7 +343,11 @@ def main() -> None:
         "fill in SOURCE_GIT_SHA from a local `git rev-parse HEAD` before running on Kaggle"
     )
     prerank_state = run_prerank_and_consistency()
-    batching_points = run_batching()
+    # Built once and threaded through all three serving experiments, so
+    # batching, precision and queue discipline are all measured against the
+    # same real request stream rather than three separate placeholder lists.
+    request_pairs = build_request_pairs(prerank_state["candidate_texts"])
+    batching_points = run_batching(request_pairs)
     best_point = max(batching_points, key=lambda p: p["throughput_qps"])
     best_setting = (best_point["max_batch_size"], best_point["max_wait_ms"])
     run_precision(
@@ -328,8 +356,13 @@ def main() -> None:
         survivors_by_qid=prerank_state["survivors_by_qid"],
         candidate_texts=prerank_state["candidate_texts"],
         cascade_ndcg_10_fp32=prerank_state["cascade_ndcg_10_fp32"],
+        request_pairs=request_pairs,
     )
-    run_queue_disciplines(best_setting, baseline_throughput_qps=best_point["throughput_qps"])
+    run_queue_disciplines(
+        best_setting,
+        baseline_throughput_qps=best_point["throughput_qps"],
+        request_pairs=request_pairs,
+    )
 
 
 if __name__ == "__main__":

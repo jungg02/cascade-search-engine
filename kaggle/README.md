@@ -34,16 +34,12 @@
 4. In a notebook cell:
    ```bash
    !pip uninstall -y onnxruntime  # Kaggle images may preinstall the CPU build
-   !pip install onnxruntime-gpu onnxconverter-common nest_asyncio
+   !pip install onnxruntime-gpu onnxconverter-common
    ```
-   `nest_asyncio` is required because Kaggle (like Jupyter/Colab generally)
-   runs each cell inside an already-active asyncio event loop --
-   `phase4_driver.py` calls `nest_asyncio.apply()` at import time
-   specifically to let its `asyncio.run(...)` calls (inside
-   `rank.crossencoder_harness`'s batching/queue-discipline harness) work
-   there; without it, `run_batching()` fails with `RuntimeError:
-   asyncio.run() cannot be called from a running event loop` immediately
-   after prerank succeeds.
+   No `nest_asyncio` (an earlier version of this driver needed it): the
+   batching/queue-discipline harness in `rank.crossencoder_harness` is
+   thread-based and no longer calls `asyncio.run(...)`, so Kaggle's
+   already-active event loop is no longer in the way.
 5. Before running, edit `kaggle/phase4_driver.py`'s `SOURCE_GIT_SHA` constant
    — run `git rev-parse HEAD` locally and paste the result in, since Kaggle
    has no git repo to read it from (see this phase's design spec, "Kaggle

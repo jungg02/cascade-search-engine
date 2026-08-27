@@ -1,8 +1,17 @@
 """Cross-encoder serving harness: ONNX export/precision variants, an
-in-process async dynamic-batching harness (no real network hop -- an
+in-process dynamic-batching harness (no real network hop -- harness.loadgen's
 open-loop request generator feeds rank.batcher.DynamicBatcher directly,
 matching the design spec's choice to keep this runnable inside one Kaggle
 notebook), and queue discipline (load-shedding vs. unbounded).
+
+The batching harness is thread-based, not asyncio-based, and that is load-
+bearing: session.score() is a blocking call with no await in it, so an
+asyncio generator sharing its event loop could never advance while a batch
+was being scored -- arrivals silently throttled to the scorer's own rate and
+the generator became closed-loop in everything but name (measured: a nominal
+1992 qps target achieved ~719 qps, and no run ever shed a single request).
+Scoring now runs on a dedicated flusher thread while harness.loadgen.
+run_open_loop drives arrivals off absolute, precomputed deadlines.
 
 INT8 is dynamic quantization (onnxruntime.quantization.quantize_dynamic) --
 no calibration dataset needed, simpler than static/calibrated quantization,
@@ -16,8 +25,9 @@ back to slower ops, that IS the finding to report.
 
 from __future__ import annotations
 
-import asyncio
+import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -29,7 +39,7 @@ from onnxconverter_common import float16
 from onnxruntime.quantization import QuantType, quantize_dynamic
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from harness.histogram import LatencyRecorder
+from harness.loadgen import LoadResult, run_open_loop
 
 
 def export_onnx(model_name: str, onnx_path: Path) -> None:
@@ -130,87 +140,203 @@ class CrossEncoderSession:
         return scores
 
 
-async def _run_open_loop(
+class _QueueFullError(Exception):
+    """Raised by dispatch() under the shed discipline when the batcher is at
+    capacity. run_open_loop's own dispatch wrapper catches any exception and
+    counts it as a LoadResult error rather than aborting the run, which is
+    exactly what "shed" should mean -- but sheds are counted explicitly here
+    too (see _BatchedRun.shed_count), because result.errors would also absorb
+    a genuine scoring failure and let a broken run masquerade as successful
+    load-shedding."""
+
+
+class _ScorerFailed(Exception):
+    """Raised by dispatch() once the flusher thread has died, so in-flight and
+    subsequent arrivals fail fast instead of blocking forever on an Event that
+    nothing will ever set."""
+
+
+@dataclass
+class _BatchedRun:
+    """One open-loop run's outcome: harness.loadgen's own LoadResult plus the
+    shed count, which loadgen has no concept of."""
+
+    result: LoadResult
+    shed_count: int
+
+
+def _run_batched_open_loop(
     session,
     batcher_factory: Callable[[], "DynamicBatcher"],
     request_pairs: list[tuple[str, str]],
     duration_s: float,
-    arrival_interval_s: float,
-    on_shed: Callable[[], None] | None = None,
+    qps: float,
+    workers: int,
     max_queue_depth: int | None = None,
-) -> LatencyRecorder:
+    warmup_requests: int = 0,
+) -> _BatchedRun:
+    """Drive `session` through one shared DynamicBatcher using harness.loadgen's
+    real open-loop generator: arrivals run on their own schedule regardless of
+    how long a batch takes to score, because session.score() runs on a
+    dedicated flusher thread, not on the generator's critical path. Each
+    dispatched request enqueues itself into the batcher and blocks on its own
+    threading.Event until the flusher scores its batch and wakes it -- this is
+    what lets run_open_loop's scheduled/start/done timestamps stay meaningful
+    (queue_delay = start - scheduled genuinely reflects batcher/queue wait, not
+    an artifact of a stalled event loop).
+
+    Concurrency contract, since getting this wrong deadlocks rather than fails:
+      * `lock` guards the batcher, the shed counter and the round-robin index,
+        and nothing else. It is never held across session.score() -- the flush
+        happens under the lock, the scoring does not.
+      * A request's Event travels *inside* the batched item, so the flusher
+        only ever wakes events it was handed. There is no shared id->event map
+        for the two sides to race over.
+      * If session.score() raises, the flusher records the exception, wakes
+        every request it is holding, and keeps draining-and-waking until stop
+        is set, so no dispatch thread can block forever. dispatch() then fails
+        fast, run_open_loop returns, and the original exception is re-raised
+        here rather than surfacing as a silent hang.
+    """
     from rank.batcher import DynamicBatcher  # local import avoids a hard cycle at module load
 
     batcher: DynamicBatcher = batcher_factory()
-    recorder = LatencyRecorder()
-    pending: dict[int, float] = {}
-    next_id = 0
-    start = time.perf_counter()
-    request_index = 0
+    lock = threading.Lock()
+    stop = threading.Event()
+    failure: list[BaseException] = []
+    counters = {"shed": 0, "next_index": 0}
 
-    async def generator():
-        nonlocal next_id, request_index
-        while time.perf_counter() - start < duration_s:
+    def flusher() -> None:
+        while not stop.is_set():
+            with lock:
+                batch = batcher.flush() if batcher.should_flush() else None
+            if not batch:
+                time.sleep(0.0005)
+                continue
+            try:
+                scores = session.score([pair for _, pair in batch])
+                assert len(scores) == len(batch)
+            except BaseException as exc:  # noqa: BLE001 -- re-raised by the caller
+                failure.append(exc)
+                for event, _ in batch:
+                    event.set()
+                # Keep releasing whatever arrives until the run is torn down:
+                # dispatch() is failing fast by now, but requests already
+                # enqueued (or enqueued in the race window) still need waking.
+                while not stop.is_set():
+                    with lock:
+                        orphans = batcher.flush()
+                    for event, _ in orphans:
+                        event.set()
+                    time.sleep(0.0005)
+                return
+            for event, _ in batch:
+                event.set()
+
+    flusher_thread = threading.Thread(target=flusher, daemon=True)
+    flusher_thread.start()
+
+    def dispatch(_query: str) -> None:
+        # _query (the Zipf-sampled text run_open_loop hands us) is not used to
+        # pick the pair -- request_pairs is round-robined independently under
+        # the lock, since real pair identity for this synthetic benchmark
+        # workload doesn't need to correlate with the sampler's popularity
+        # draw, only arrival *timing* does.
+        if failure:
+            raise _ScorerFailed()
+        event = threading.Event()
+        with lock:
             if max_queue_depth is not None and len(batcher) >= max_queue_depth:
-                if on_shed is not None:
-                    on_shed()
-            else:
-                pending[next_id] = time.perf_counter()
-                batcher.add((next_id, request_pairs[request_index % len(request_pairs)]))
-                next_id += 1
-                request_index += 1
-            await asyncio.sleep(arrival_interval_s)
+                counters["shed"] += 1
+                raise _QueueFullError()
+            pair = request_pairs[counters["next_index"] % len(request_pairs)]
+            counters["next_index"] += 1
+            batcher.add((event, pair))
+        event.wait()
+        if failure:
+            raise _ScorerFailed()
 
-    async def consumer():
-        while time.perf_counter() - start < duration_s + batcher.max_wait_ms / 1000.0:
-            if batcher.should_flush():
-                batch = batcher.flush()
-                ids = [item[0] for item in batch]
-                pairs = [item[1] for item in batch]
-                scores = session.score(pairs)
-                assert len(scores) == len(pairs)
-                now = time.perf_counter()
-                for request_id in ids:
-                    recorder.record((now - pending.pop(request_id)) * 1_000_000)
-            await asyncio.sleep(0.001)
+    try:
+        for _ in range(warmup_requests):
+            dispatch("warmup")
+        result = run_open_loop(
+            dispatch=dispatch,
+            queries=[q for q, _ in request_pairs],
+            qps=qps,
+            duration_s=duration_s,
+            workers=workers,
+        )
+    finally:
+        stop.set()
+        flusher_thread.join(timeout=5.0)
+    # Checked after the finally block (so it can't mask an in-flight
+    # exception) and raised rather than ignored: a flusher that outlives its
+    # run is a daemon thread still holding an ONNX Runtime session while the
+    # interpreter tears down, which surfaces later as an unrelated-looking
+    # native crash. Fail loudly here instead.
+    if flusher_thread.is_alive():
+        raise RuntimeError("flusher thread did not stop within 5s of the run ending")
+    if failure:
+        raise failure[0]
+    return _BatchedRun(result=result, shed_count=counters["shed"])
 
-    await asyncio.gather(generator(), consumer())
-    return recorder
+
+# Requests offered per batching-sweep probe. The probe is a saturating burst:
+# qps is set far above any config's plausible throughput, so what the offered
+# rate actually buys is "every request is already waiting", and achieved_qps
+# becomes that config's real sustained throughput. The *budget* has to be the
+# bounded quantity rather than the rate, because run_open_loop precomputes the
+# whole arrival list up front and its ThreadPoolExecutor drains every submitted
+# request before returning -- a fire-hose bounded only by duration_s runs for
+# offered_requests/capacity seconds (at 100k qps for 10s: hours), not for
+# duration_s. Bounding the budget instead terminates in budget/capacity
+# seconds, identically on this repo's CPU fixture and on a Kaggle T4, with no
+# hardware-specific rate guess baked in. Consequence, stated where it can't be
+# missed: under a saturating probe the sweep's p99 is drain-dominated --
+# comparable across configs at equal budget, but not an absolute client-side
+# latency. The queue-discipline experiment below, which offers a real specified
+# arrival rate, is where latency/queue_delay are absolute numbers.
+DEFAULT_PROBE_REQUESTS = 2000
+_SATURATING_QPS = 100_000.0
 
 
 def run_batching_sweep(
     session_factory: Callable[[], CrossEncoderSession],
     grid: list[tuple[int, float]],
     request_pairs: list[tuple[str, str]],
-    duration_s: float = 2.0,
+    probe_requests: int = DEFAULT_PROBE_REQUESTS,
+    warmup_requests: int = 20,
 ) -> list[dict]:
     from rank.batcher import DynamicBatcher
 
     session = session_factory()
     points = []
     for max_batch_size, max_wait_ms in grid:
-        recorder = asyncio.run(
-            _run_open_loop(
-                session,
-                # DynamicBatcher's clock contract is milliseconds (its
-                # max_wait_ms comparison assumes clock() ticks in ms) --
-                # time.perf_counter() ticks in seconds, so it must be scaled
-                # here or a "5ms" wait budget silently becomes 5 seconds.
-                batcher_factory=lambda: DynamicBatcher(
-                    max_batch_size, max_wait_ms, lambda: time.perf_counter() * 1000.0
-                ),
-                request_pairs=request_pairs,
-                duration_s=duration_s,
-                arrival_interval_s=0.001,
-            )
+        run = _run_batched_open_loop(
+            session,
+            # DynamicBatcher's clock contract is milliseconds (its max_wait_ms
+            # comparison assumes clock() ticks in ms) -- time.perf_counter()
+            # ticks in seconds, so it must be scaled here or a "5ms" wait
+            # budget silently becomes 5 seconds.
+            batcher_factory=lambda: DynamicBatcher(
+                max_batch_size, max_wait_ms, lambda: time.perf_counter() * 1000.0
+            ),
+            request_pairs=request_pairs,
+            duration_s=probe_requests / _SATURATING_QPS,
+            qps=_SATURATING_QPS,
+            # Sized well above max_batch_size so the thread pool is never what
+            # stops a batch from filling -- the batcher's own max_batch_size/
+            # max_wait_ms must be the only thing shaping throughput.
+            workers=max(max_batch_size * 8, 64),
+            warmup_requests=warmup_requests,
         )
-        summary = recorder.summary()
+        summary = run.result.summary()
         points.append(
             {
                 "max_batch_size": max_batch_size,
                 "max_wait_ms": max_wait_ms,
-                "latency_us": summary,
-                "throughput_qps": summary.get("count", 0) / duration_s,
+                "latency_us": summary["latency"],
+                "throughput_qps": run.result.achieved_qps,
             }
         )
     return points
@@ -224,35 +350,37 @@ def run_queue_discipline(
     request_pairs: list[tuple[str, str]],
     duration_s: float = 2.0,
     max_queue_depth: int = 64,
+    warmup_requests: int = 20,
 ) -> dict:
     from rank.batcher import DynamicBatcher
 
     session = session_factory()
     max_batch_size, max_wait_ms = batcher_config
-    shed_count = 0
+    # Generously sized so the thread pool is never the binding constraint --
+    # only the batcher's max_queue_depth (shed) or real scorer throughput
+    # (unbounded) should be able to cause backlog/shedding.
+    workers = max(max_queue_depth * 4, 256)
 
-    def on_shed():
-        nonlocal shed_count
-        shed_count += 1
-
-    recorder = asyncio.run(
-        _run_open_loop(
-            session,
-            # See run_batching_sweep's comment: DynamicBatcher expects a
-            # millisecond clock, not seconds.
-            batcher_factory=lambda: DynamicBatcher(
-                max_batch_size, max_wait_ms, lambda: time.perf_counter() * 1000.0
-            ),
-            request_pairs=request_pairs,
-            duration_s=duration_s,
-            arrival_interval_s=1.0 / arrival_rate_qps,
-            on_shed=on_shed if discipline == "shed" else None,
-            max_queue_depth=max_queue_depth if discipline == "shed" else None,
-        )
+    run = _run_batched_open_loop(
+        session,
+        # See run_batching_sweep's comment: DynamicBatcher expects a
+        # millisecond clock, not seconds.
+        batcher_factory=lambda: DynamicBatcher(
+            max_batch_size, max_wait_ms, lambda: time.perf_counter() * 1000.0
+        ),
+        request_pairs=request_pairs,
+        duration_s=duration_s,
+        qps=arrival_rate_qps,
+        workers=workers,
+        max_queue_depth=max_queue_depth if discipline == "shed" else None,
+        warmup_requests=warmup_requests,
     )
+    summary = run.result.summary()
     return {
         "discipline": discipline,
         "arrival_rate_qps": arrival_rate_qps,
-        "latency_us": recorder.summary(),
-        "shed_count": shed_count,
+        "achieved_qps": run.result.achieved_qps,
+        "latency_us": summary["latency"],
+        "queue_delay_us": summary["queue_delay"],
+        "shed_count": run.shed_count,
     }

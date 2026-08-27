@@ -1,8 +1,9 @@
 """Dynamic-batching queue logic: accumulate requests until either
 max_batch_size or max_wait_ms is hit, whichever comes first. Pure given an
 injected clock, so the batching *decision* is unit-tested without any real
-async runtime or GPU -- crossencoder_harness.py wraps this in an asyncio
-loop that actually calls the model.
+concurrency or GPU -- crossencoder_harness.py wraps this in a flusher thread
+that actually calls the model, guarding every add/should_flush/flush call
+with its own lock (this class is deliberately not internally synchronized).
 """
 
 from __future__ import annotations
