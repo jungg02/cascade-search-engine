@@ -1472,8 +1472,16 @@ This task has no local "run it" step — it is written and reviewed here, then t
 4. In a notebook cell:
    ```bash
    !pip uninstall -y onnxruntime  # Kaggle images may preinstall the CPU build
-   !pip install onnxruntime-gpu onnxconverter-common
+   !pip install onnxruntime-gpu onnxconverter-common nest_asyncio
    ```
+   `nest_asyncio` is required because Kaggle (like Jupyter/Colab generally)
+   runs each cell inside an already-active asyncio event loop --
+   `phase4_driver.py` calls `nest_asyncio.apply()` at import time
+   specifically to let its `asyncio.run(...)` calls (inside
+   `rank.crossencoder_harness`'s batching/queue-discipline harness) work
+   there; without it, `run_batching()` fails with `RuntimeError:
+   asyncio.run() cannot be called from a running event loop` immediately
+   after prerank succeeds.
 5. Before running, edit `kaggle/phase4_driver.py`'s `SOURCE_GIT_SHA` constant
    — run `git rev-parse HEAD` locally and paste the result in, since Kaggle
    has no git repo to read it from (see this phase's design spec, "Kaggle
@@ -1505,6 +1513,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import nest_asyncio
 import torch
 
 from harness.datasets import load_qrels, load_queries
@@ -1529,6 +1538,19 @@ from rank.prerank_mlp import (
     survivors_for_query,
     train_mlp,
 )
+
+# Kaggle (and Jupyter/Colab generally) runs each cell inside an already-active
+# asyncio event loop -- rank.crossencoder_harness's run_batching_sweep/
+# run_queue_discipline call asyncio.run(...) internally, which raises
+# "asyncio.run() cannot be called from a running event loop" in that
+# environment, even though the identical code runs fine as a plain script
+# (which is how Task 7's own tests exercise it) or under pytest (no loop
+# running there either). nest_asyncio.apply() patches the running loop to
+# tolerate the nested asyncio.run() call; applying it once here, before any
+# of this driver's functions run, is scoped to this Kaggle-only script rather
+# than added as a rank package dependency nothing else needs. Found on a real
+# Kaggle run: prerank succeeded, then run_batching() raised this immediately.
+nest_asyncio.apply()
 
 # Filled in by hand before uploading -- `git rev-parse HEAD` on this repo,
 # immediately before uploading this file. Kaggle has no git repo to read it
