@@ -36,6 +36,16 @@ class DynamicBatcher:
         return elapsed >= self.max_wait_ms
 
     def flush(self) -> list:
-        items, self._items = self._items, []
-        self._window_start = None
+        # Capped at max_batch_size even when should_flush() fired on the
+        # max_wait_ms branch with more items already queued -- under a single
+        # writer this rarely mattered (should_flush()'s count check fires
+        # before the queue can overshoot by much), but with many concurrent
+        # producers adding faster than one flusher thread can drain, the
+        # queue can accumulate well past max_batch_size between checks. An
+        # uncapped flush would silently turn "max_batch_size" into "however
+        # much piled up," confounding the very axis the batching sweep exists
+        # to measure.
+        items = self._items[: self.max_batch_size]
+        self._items = self._items[self.max_batch_size :]
+        self._window_start = self._clock() if self._items else None
         return items
