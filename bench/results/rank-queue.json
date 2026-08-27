@@ -1,0 +1,110 @@
+{
+  "runs": [
+    {
+      "discipline": "shed",
+      "arrival_rate_qps": 996.0,
+      "latency_us": {
+        "count": 6893,
+        "min_us": 6443.512999794621,
+        "p50_us": 16668.780999680166,
+        "p95_us": 25790.74999994191,
+        "p99_us": 26352.851000410737,
+        "p999_us": 27199.409999411728,
+        "max_us": 30430.90699975437
+      },
+      "shed_count": 0
+    },
+    {
+      "discipline": "shed",
+      "arrival_rate_qps": 1328.0,
+      "latency_us": {
+        "count": 7170,
+        "min_us": 5639.8249998892425,
+        "p50_us": 16199.665000385721,
+        "p95_us": 26009.130000602454,
+        "p99_us": 26716.307000242523,
+        "p999_us": 27257.900000222435,
+        "max_us": 27698.70300016919
+      },
+      "shed_count": 0
+    },
+    {
+      "discipline": "shed",
+      "arrival_rate_qps": 1992.0,
+      "latency_us": {
+        "count": 7188,
+        "min_us": 5665.364999913436,
+        "p50_us": 16127.255999890622,
+        "p95_us": 25966.294999307138,
+        "p99_us": 26609.6639998068,
+        "p999_us": 27215.015000365383,
+        "max_us": 27880.265999556286
+      },
+      "shed_count": 0
+    },
+    {
+      "discipline": "unbounded",
+      "arrival_rate_qps": 996.0,
+      "latency_us": {
+        "count": 6715,
+        "min_us": 6298.141999650397,
+        "p50_us": 16875.209999852814,
+        "p95_us": 26235.496000481362,
+        "p99_us": 27079.348000370373,
+        "p999_us": 27487.581000059436,
+        "max_us": 27537.986999959685
+      },
+      "shed_count": 0
+    },
+    {
+      "discipline": "unbounded",
+      "arrival_rate_qps": 1328.0,
+      "latency_us": {
+        "count": 7019,
+        "min_us": 6104.461000177253,
+        "p50_us": 16658.968000228924,
+        "p95_us": 26471.414999832632,
+        "p99_us": 27237.26499971235,
+        "p999_us": 27602.174999628915,
+        "max_us": 28677.06199958775
+      },
+      "shed_count": 0
+    },
+    {
+      "discipline": "unbounded",
+      "arrival_rate_qps": 1992.0,
+      "latency_us": {
+        "count": 7041,
+        "min_us": 5969.212999843876,
+        "p50_us": 16582.794999521866,
+        "p95_us": 26479.1689996855,
+        "p99_us": 27142.309999362624,
+        "p999_us": 27521.164000063436,
+        "max_us": 29378.364999502082
+      },
+      "shed_count": 0
+    }
+  ],
+  "active_providers": [
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "provenance": {
+    "timestamp_utc": "2026-08-27T11:03:15.354837+00:00",
+    "git_sha": "cde154ec38ae4b94ac4b78eb98aec5e5173246ae",
+    "git_dirty": null,
+    "hardware": {
+      "model": "unknown",
+      "cpu": "unknown",
+      "cores": "unknown",
+      "memory_bytes": "unknown",
+      "platform": "Linux-6.12.90+-x86_64-with-glibc2.35"
+    },
+    "python": "3.12.13",
+    "kaggle_hardware": {
+      "cuda_available": true,
+      "gpu_name": "Tesla T4",
+      "gpu_total_memory_bytes": 15636037632
+    }
+  }
+}
