@@ -18,6 +18,7 @@ from rank.crossencoder_harness import (
     export_onnx,
     quantize_int8,
     run_batching_sweep,
+    run_queue_discipline,
 )
 
 MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -115,8 +116,57 @@ def test_batching_sweep_tiny_grid(fp32_onnx_path: Path):
         session_factory=lambda: session,
         grid=[(1, 0.0), (4, 5.0)],
         request_pairs=pairs,
+        # A saturating probe's wall time is probe_requests/throughput, so the
+        # budget (not a duration) is what keeps this test to a few seconds on
+        # a CPU-only fixture model.
+        probe_requests=200,
+        warmup_requests=2,
     )
     assert len(points) == 2
     for point in points:
         assert "max_batch_size" in point and "max_wait_ms" in point
         assert "latency_us" in point and "throughput_qps" in point
+        assert point["throughput_qps"] > 0
+
+
+def test_queue_discipline_reports_achieved_qps_and_queue_delay(fp32_onnx_path: Path):
+    session = CrossEncoderSession(fp32_onnx_path, MODEL_NAME, providers=["CPUExecutionProvider"])
+    pairs = [("query text", f"passage number {i}") for i in range(6)]
+    result = run_queue_discipline(
+        session_factory=lambda: session,
+        discipline="unbounded",
+        arrival_rate_qps=200.0,
+        batcher_config=(4, 5.0),
+        request_pairs=pairs,
+        duration_s=0.5,
+        warmup_requests=2,
+    )
+    assert result["discipline"] == "unbounded"
+    assert result["achieved_qps"] > 0
+    assert "p99_us" in result["latency_us"]
+    assert "p99_us" in result["queue_delay_us"]
+    assert result["shed_count"] == 0
+
+
+def test_shed_discipline_actually_sheds_under_overload(fp32_onnx_path: Path):
+    # The regression test for I1 itself. Under the old closed-loop harness the
+    # arrival generator shared an event loop with the blocking scorer, so
+    # offered load throttled itself down to whatever the scorer permitted and
+    # the queue could never fill -- shed_count was structurally 0 (as it was
+    # in every committed rank-queue.json run), and this assertion could not
+    # have been made to pass locally at any arrival rate. With a genuinely
+    # open-loop generator, a depth-1 queue at 500 qps against a CPU-bound
+    # cross-encoder must shed.
+    session = CrossEncoderSession(fp32_onnx_path, MODEL_NAME, providers=["CPUExecutionProvider"])
+    pairs = [("query text", f"passage number {i}") for i in range(6)]
+    result = run_queue_discipline(
+        session_factory=lambda: session,
+        discipline="shed",
+        arrival_rate_qps=500.0,
+        batcher_config=(4, 5.0),
+        request_pairs=pairs,
+        duration_s=0.5,
+        max_queue_depth=1,
+        warmup_requests=2,
+    )
+    assert result["shed_count"] > 0
