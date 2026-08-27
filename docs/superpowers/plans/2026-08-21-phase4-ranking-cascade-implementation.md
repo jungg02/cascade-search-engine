@@ -1639,10 +1639,18 @@ def run_queue_discipline(
         warmup_requests=warmup_requests,
     )
     summary = run.result.summary()
+    # Not run.result.achieved_qps: loadgen counts every *dispatched* request,
+    # shed ones included, so under the shed discipline that field reads as
+    # "sustained 2287 qps" for a run that actually served ~518 and dropped the
+    # rest -- the opposite of the point. "Achieved" here means completed.
+    # Identical to loadgen's own number under the unbounded discipline, which
+    # sheds nothing.
+    completed_qps = run.result.completed / run.result.wall_s if run.result.wall_s > 0 else 0.0
     return {
         "discipline": discipline,
         "arrival_rate_qps": arrival_rate_qps,
-        "achieved_qps": run.result.achieved_qps,
+        "achieved_qps": completed_qps,
+        "dispatched_qps": run.result.achieved_qps,
         "latency_us": summary["latency"],
         "queue_delay_us": summary["queue_delay"],
         "shed_count": run.shed_count,
