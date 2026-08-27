@@ -243,7 +243,7 @@ def _run_batched_open_loop(
         # workload doesn't need to correlate with the sampler's popularity
         # draw, only arrival *timing* does.
         if failure:
-            raise _ScorerFailed()
+            raise _ScorerFailed() from failure[0]
         event = threading.Event()
         with lock:
             if max_queue_depth is not None and len(batcher) >= max_queue_depth:
@@ -254,7 +254,7 @@ def _run_batched_open_loop(
             batcher.add((event, pair))
         event.wait()
         if failure:
-            raise _ScorerFailed()
+            raise _ScorerFailed() from failure[0]
 
     try:
         for _ in range(warmup_requests):
@@ -374,6 +374,16 @@ def run_queue_discipline(
         workers=workers,
         max_queue_depth=max_queue_depth if discipline == "shed" else None,
         warmup_requests=warmup_requests,
+    )
+    # The only source of a dispatch-side error is _QueueFullError (shed) or a
+    # scorer failure (_ScorerFailed, which propagates out of
+    # _run_batched_open_loop instead of returning) -- so under "shed" every
+    # counted error must be a shed, and "unbounded" (no queue cap) must shed
+    # nothing. If this ever fires, something is raising from dispatch() that
+    # isn't accounted for above.
+    assert run.result.errors == (run.shed_count if discipline == "shed" else 0), (
+        f"errors ({run.result.errors}) and shed_count ({run.shed_count}) "
+        f"disagree under discipline={discipline!r}"
     )
     summary = run.result.summary()
     # Not run.result.achieved_qps: loadgen counts every *dispatched* request,

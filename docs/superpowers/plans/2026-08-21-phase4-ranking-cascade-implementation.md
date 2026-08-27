@@ -720,6 +720,44 @@ def test_flush_resets_the_batch_and_wait_window():
     assert not batcher.should_flush()
 
 
+def test_flush_caps_at_max_batch_size_even_when_more_items_are_queued():
+    # Regression test: a caller that adds faster than it flushes (many
+    # concurrent producers against one flusher, as crossencoder_harness.py's
+    # threaded harness does) can queue well past max_batch_size before
+    # should_flush() is next checked. flush() must still hand back at most
+    # max_batch_size items -- an uncapped flush would silently turn
+    # "max_batch_size" into "however much piled up."
+    clock = FakeClock()
+    batcher = DynamicBatcher(max_batch_size=2, max_wait_ms=100, clock=clock)
+    batcher.add("a")
+    batcher.add("b")
+    batcher.add("c")
+    batcher.add("d")
+    assert batcher.should_flush()
+    assert batcher.flush() == ["a", "b"]
+    assert len(batcher) == 2
+    assert batcher.should_flush()
+    assert batcher.flush() == ["c", "d"]
+    assert len(batcher) == 0
+
+
+def test_flush_keeps_the_wait_window_running_for_leftover_items():
+    # window_start must not reset to None when items remain after a capped
+    # flush, or a leftover partial batch would silently lose its max_wait_ms
+    # deadline and wait forever for a batch-size trigger that may never come.
+    clock = FakeClock()
+    batcher = DynamicBatcher(max_batch_size=2, max_wait_ms=5, clock=clock)
+    batcher.add("a")
+    batcher.add("b")
+    batcher.add("c")
+    batcher.flush()
+    assert len(batcher) == 1
+    assert not batcher.should_flush()
+    clock.advance(5.0)
+    assert batcher.should_flush()
+    assert batcher.flush() == ["c"]
+
+
 def test_len_reflects_current_queue_depth():
     clock = FakeClock()
     batcher = DynamicBatcher(max_batch_size=10, max_wait_ms=100, clock=clock)
@@ -777,15 +815,25 @@ class DynamicBatcher:
         return elapsed >= self.max_wait_ms
 
     def flush(self) -> list:
-        items, self._items = self._items, []
-        self._window_start = None
+        # Capped at max_batch_size even when should_flush() fired on the
+        # max_wait_ms branch with more items already queued -- under a single
+        # writer this rarely mattered (should_flush()'s count check fires
+        # before the queue can overshoot by much), but with many concurrent
+        # producers adding faster than one flusher thread can drain, the
+        # queue can accumulate well past max_batch_size between checks. An
+        # uncapped flush would silently turn "max_batch_size" into "however
+        # much piled up," confounding the very axis the batching sweep exists
+        # to measure.
+        items = self._items[: self.max_batch_size]
+        self._items = self._items[self.max_batch_size :]
+        self._window_start = self._clock() if self._items else None
         return items
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest py/rank/tests/test_batcher.py -v`
-Expected: 5 passed.
+Expected: 7 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -1506,7 +1554,7 @@ def _run_batched_open_loop(
         # workload doesn't need to correlate with the sampler's popularity
         # draw, only arrival *timing* does.
         if failure:
-            raise _ScorerFailed()
+            raise _ScorerFailed() from failure[0]
         event = threading.Event()
         with lock:
             if max_queue_depth is not None and len(batcher) >= max_queue_depth:
@@ -1517,7 +1565,7 @@ def _run_batched_open_loop(
             batcher.add((event, pair))
         event.wait()
         if failure:
-            raise _ScorerFailed()
+            raise _ScorerFailed() from failure[0]
 
     try:
         for _ in range(warmup_requests):
@@ -1637,6 +1685,16 @@ def run_queue_discipline(
         workers=workers,
         max_queue_depth=max_queue_depth if discipline == "shed" else None,
         warmup_requests=warmup_requests,
+    )
+    # The only source of a dispatch-side error is _QueueFullError (shed) or a
+    # scorer failure (_ScorerFailed, which propagates out of
+    # _run_batched_open_loop instead of returning) -- so under "shed" every
+    # counted error must be a shed, and "unbounded" (no queue cap) must shed
+    # nothing. If this ever fires, something is raising from dispatch() that
+    # isn't accounted for above.
+    assert run.result.errors == (run.shed_count if discipline == "shed" else 0), (
+        f"errors ({run.result.errors}) and shed_count ({run.shed_count}) "
+        f"disagree under discipline={discipline!r}"
     )
     summary = run.result.summary()
     # Not run.result.achieved_qps: loadgen counts every *dispatched* request,
@@ -2197,6 +2255,14 @@ def render_batching_table(batching: dict) -> str:
             f"| {p['max_batch_size']} | {p['max_wait_ms']} | {p['throughput_qps']:.1f} | "
             f"{p['latency_us']['p50_us']/1000:.2f} | {p['latency_us']['p99_us']/1000:.2f} |"
         )
+    lines.append(
+        "\n*Each row is a saturating probe (a fixed request budget drained as "
+        "fast as the config allows), not a fixed client arrival rate -- "
+        "latency here is drain-dominated and only comparable "
+        "config-to-config at equal budget, not an absolute client-side "
+        "number. The queue-discipline table below offers a real specified "
+        "arrival rate, where latency is absolute.*"
+    )
     return "\n".join(lines)
 
 
@@ -2215,6 +2281,17 @@ def render_precision_table(precision: dict) -> str:
             f"{row['latency_us'].get('p999_us', 0)/1000:.2f} | {row['latency_us'].get('max_us', 0)/1000:.2f} | "
             f"{row['cascade_ndcg_10']:.4f} | {row['ndcg_10_delta_vs_fp32']:+.4f} |"
         )
+    lines.append(
+        "\n*throughput/NDCG columns are the real cross-precision comparison. "
+        "The latency columns are saturating-probe numbers (see the batching "
+        "table above) -- a slower precision drains the same request budget "
+        "over a longer wall clock, so its p99/p999/max inflate roughly in "
+        "proportion to its slowness, as an artifact of the probe rather than "
+        "of serving latency at a fixed rate. Each precision's own p999-vs-p99 "
+        "ratio is still meaningful (same probe, same budget); the absolute "
+        "milliseconds across rows are not directly comparable to a "
+        "production client's experience.*"
+    )
     return "\n".join(lines)
 
 
@@ -2233,6 +2310,15 @@ def render_queue_table(queue: dict) -> str:
             f"{row['latency_us'].get('p99_us', 0)/1000:.2f} | "
             f"{row.get('queue_delay_us', {}).get('p99_us', 0)/1000:.2f} | {row['shed_count']} |"
         )
+    lines.append(
+        "\n*p99 pools served and shed requests together, so a `shed` row's "
+        "percentile is over a mixed population (a shed request fails fast, "
+        "far below what a served one costs) -- at these disciplines' typical "
+        "shed fractions the effect on the reported p99 is modest (roughly "
+        "one percentile point per ~15% shed), not large enough to change "
+        "which configuration looks better, but the number is not purely "
+        "\"latency of requests that were served.\"*"
+    )
     return "\n".join(lines)
 
 
@@ -2278,6 +2364,15 @@ def render_provider_warning(prerank: dict, batching: dict, precision: dict, queu
 
 def render_markdown(prerank: dict, batching: dict, precision: dict, queue: dict) -> str:
     provenance = prerank["provenance"]
+    # PHASE1_BASELINE_NDCG_10 is only valid pooled over exactly the 97
+    # dl19+dl20 queries it was derived from -- if a future run's query set
+    # ever changes, this must fail loudly rather than silently print a
+    # baseline for a different population than the one just measured.
+    assert prerank["num_queries"] == 97, (
+        f"PHASE1_BASELINE_NDCG_10 is pooled over 97 dl19+dl20 queries; "
+        f"this run has {prerank['num_queries']}. Re-derive the constant "
+        f"from bench/phase1.md before trusting this comparison."
+    )
     return f"""# Phase 4: Ranking Cascade and Heterogeneous Serving
 
 ## Execution provider check
@@ -2297,8 +2392,8 @@ Of the true top-{prerank['top_k_survivors']} under the full cross-encoder
 ranker, **{prerank['mean_prerank_consistency']:.1%}** survive pre-ranking
 (mean over {prerank['num_queries']} dl19+dl20 queries). Full-cascade result:
 NDCG@10 = {prerank['cascade_ndcg_10']:.4f}, recall@100 = {prerank['cascade_recall_100']:.4f}.
-Phase 1's own first-stage (lexical-only) baseline over the same 97
-queries: NDCG@10 = {PHASE1_BASELINE_NDCG_10:.4f}.
+Phase 1's own first-stage (lexical-only) baseline over the same
+{prerank['num_queries']} queries: NDCG@10 = {PHASE1_BASELINE_NDCG_10:.4f}.
 
 ## Dynamic batching: throughput vs. p99 latency
 

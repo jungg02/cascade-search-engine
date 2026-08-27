@@ -56,6 +56,14 @@ def render_batching_table(batching: dict) -> str:
             f"| {p['max_batch_size']} | {p['max_wait_ms']} | {p['throughput_qps']:.1f} | "
             f"{p['latency_us']['p50_us']/1000:.2f} | {p['latency_us']['p99_us']/1000:.2f} |"
         )
+    lines.append(
+        "\n*Each row is a saturating probe (a fixed request budget drained as "
+        "fast as the config allows), not a fixed client arrival rate -- "
+        "latency here is drain-dominated and only comparable "
+        "config-to-config at equal budget, not an absolute client-side "
+        "number. The queue-discipline table below offers a real specified "
+        "arrival rate, where latency is absolute.*"
+    )
     return "\n".join(lines)
 
 
@@ -74,6 +82,17 @@ def render_precision_table(precision: dict) -> str:
             f"{row['latency_us'].get('p999_us', 0)/1000:.2f} | {row['latency_us'].get('max_us', 0)/1000:.2f} | "
             f"{row['cascade_ndcg_10']:.4f} | {row['ndcg_10_delta_vs_fp32']:+.4f} |"
         )
+    lines.append(
+        "\n*throughput/NDCG columns are the real cross-precision comparison. "
+        "The latency columns are saturating-probe numbers (see the batching "
+        "table above) -- a slower precision drains the same request budget "
+        "over a longer wall clock, so its p99/p999/max inflate roughly in "
+        "proportion to its slowness, as an artifact of the probe rather than "
+        "of serving latency at a fixed rate. Each precision's own p999-vs-p99 "
+        "ratio is still meaningful (same probe, same budget); the absolute "
+        "milliseconds across rows are not directly comparable to a "
+        "production client's experience.*"
+    )
     return "\n".join(lines)
 
 
@@ -92,6 +111,15 @@ def render_queue_table(queue: dict) -> str:
             f"{row['latency_us'].get('p99_us', 0)/1000:.2f} | "
             f"{row.get('queue_delay_us', {}).get('p99_us', 0)/1000:.2f} | {row['shed_count']} |"
         )
+    lines.append(
+        "\n*p99 pools served and shed requests together, so a `shed` row's "
+        "percentile is over a mixed population (a shed request fails fast, "
+        "far below what a served one costs) -- at these disciplines' typical "
+        "shed fractions the effect on the reported p99 is modest (roughly "
+        "one percentile point per ~15% shed), not large enough to change "
+        "which configuration looks better, but the number is not purely "
+        "\"latency of requests that were served.\"*"
+    )
     return "\n".join(lines)
 
 
@@ -137,6 +165,15 @@ def render_provider_warning(prerank: dict, batching: dict, precision: dict, queu
 
 def render_markdown(prerank: dict, batching: dict, precision: dict, queue: dict) -> str:
     provenance = prerank["provenance"]
+    # PHASE1_BASELINE_NDCG_10 is only valid pooled over exactly the 97
+    # dl19+dl20 queries it was derived from -- if a future run's query set
+    # ever changes, this must fail loudly rather than silently print a
+    # baseline for a different population than the one just measured.
+    assert prerank["num_queries"] == 97, (
+        f"PHASE1_BASELINE_NDCG_10 is pooled over 97 dl19+dl20 queries; "
+        f"this run has {prerank['num_queries']}. Re-derive the constant "
+        f"from bench/phase1.md before trusting this comparison."
+    )
     return f"""# Phase 4: Ranking Cascade and Heterogeneous Serving
 
 ## Execution provider check
@@ -156,8 +193,8 @@ Of the true top-{prerank['top_k_survivors']} under the full cross-encoder
 ranker, **{prerank['mean_prerank_consistency']:.1%}** survive pre-ranking
 (mean over {prerank['num_queries']} dl19+dl20 queries). Full-cascade result:
 NDCG@10 = {prerank['cascade_ndcg_10']:.4f}, recall@100 = {prerank['cascade_recall_100']:.4f}.
-Phase 1's own first-stage (lexical-only) baseline over the same 97
-queries: NDCG@10 = {PHASE1_BASELINE_NDCG_10:.4f}.
+Phase 1's own first-stage (lexical-only) baseline over the same
+{prerank['num_queries']} queries: NDCG@10 = {PHASE1_BASELINE_NDCG_10:.4f}.
 
 ## Dynamic batching: throughput vs. p99 latency
 

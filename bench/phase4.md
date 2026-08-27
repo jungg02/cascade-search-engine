@@ -1,5 +1,19 @@
 # Phase 4: Ranking Cascade and Heterogeneous Serving
 
+> **⚠️ STALE — every number below is known wrong, pending a re-run.** This
+> report was rendered before a fix wave corrected two defects in how it was
+> measured: (1) the cross-encoder was exported without `token_type_ids`,
+> silently zeroing its query/passage segment signal, so every NDCG@10 and
+> prerank-consistency number below reflects a cascade *worse than the BM25
+> first-stage baseline it's meant to improve on* — not this phase's real
+> result; (2) the batching/queue-discipline harness was effectively
+> closed-loop, so `shed_count: 0` across every row below is an artifact of a
+> load generator that never reached the offered rate, not a genuine "no
+> shedding needed" finding. Both are fixed in code; this file will be
+> regenerated (`PYTHONPATH=py uv run python -m rank.report`) once the
+> corrected pipeline has been re-run on Kaggle and fresh `bench/results/
+> rank-*.json` files are downloaded.
+
 ## Execution provider check
 
 All sub-experiments ran on `CUDAExecutionProvider` as requested.
