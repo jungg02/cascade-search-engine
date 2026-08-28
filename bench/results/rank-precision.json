@@ -1,0 +1,86 @@
+{
+  "setting": {
+    "max_batch_size": 8,
+    "max_wait_ms": 0
+  },
+  "results": {
+    "fp32": {
+      "max_batch_size": 8,
+      "max_wait_ms": 0,
+      "latency_us": {
+        "count": 4939,
+        "min_us": 9090.482,
+        "p50_us": 3968784.731,
+        "p95_us": 7494293.611,
+        "p99_us": 7803827.428,
+        "p999_us": 7873076.122,
+        "max_us": 7873293.059
+      },
+      "throughput_qps": 623.3386501806391,
+      "cascade_ndcg_10": 0.7393738950516104,
+      "ndcg_10_delta_vs_fp32": 0.0,
+      "active_providers": [
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider"
+      ]
+    },
+    "fp16": {
+      "max_batch_size": 8,
+      "max_wait_ms": 0,
+      "latency_us": {
+        "count": 4939,
+        "min_us": 4485.2,
+        "p50_us": 1807902.413,
+        "p95_us": 3428367.038,
+        "p99_us": 3571934.639,
+        "p999_us": 3598688.983,
+        "max_us": 3600515.688
+      },
+      "throughput_qps": 1352.8889390992051,
+      "cascade_ndcg_10": 0.739326323175126,
+      "ndcg_10_delta_vs_fp32": -4.757187648440908e-05,
+      "active_providers": [
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider"
+      ]
+    },
+    "int8": {
+      "max_batch_size": 8,
+      "max_wait_ms": 0,
+      "latency_us": {
+        "count": 4939,
+        "min_us": 30333.477,
+        "p50_us": 38156735.081,
+        "p95_us": 71825568.919,
+        "p99_us": 74578567.602,
+        "p999_us": 75082648.159,
+        "max_us": 75105009.365
+      },
+      "throughput_qps": 65.71728885691867,
+      "cascade_ndcg_10": 0.7374161924121734,
+      "ndcg_10_delta_vs_fp32": -0.0019577026394370645,
+      "active_providers": [
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider"
+      ]
+    }
+  },
+  "provenance": {
+    "timestamp_utc": "2026-08-28T08:52:25.946753+00:00",
+    "git_sha": "e1ed6cafa07998dc2bbd32cbc61c16febd72276c",
+    "git_dirty": null,
+    "hardware": {
+      "model": "unknown",
+      "cpu": "unknown",
+      "cores": "unknown",
+      "memory_bytes": "unknown",
+      "platform": "Linux-6.12.90+-x86_64-with-glibc2.35"
+    },
+    "python": "3.12.13",
+    "kaggle_hardware": {
+      "cuda_available": true,
+      "gpu_name": "Tesla T4",
+      "gpu_total_memory_bytes": 15636037632
+    }
+  }
+}

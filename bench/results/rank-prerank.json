@@ -1,0 +1,30 @@
+{
+  "mean_prerank_consistency": 0.6454639175257731,
+  "num_queries": 97,
+  "cascade_ndcg_10": 0.7393738950516104,
+  "cascade_recall_100": 0.6299368315784033,
+  "top_k_survivors": 100,
+  "run_depth": 100,
+  "active_providers": [
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "provenance": {
+    "timestamp_utc": "2026-08-28T08:46:53.168799+00:00",
+    "git_sha": "e1ed6cafa07998dc2bbd32cbc61c16febd72276c",
+    "git_dirty": null,
+    "hardware": {
+      "model": "unknown",
+      "cpu": "unknown",
+      "cores": "unknown",
+      "memory_bytes": "unknown",
+      "platform": "Linux-6.12.90+-x86_64-with-glibc2.35"
+    },
+    "python": "3.12.13",
+    "kaggle_hardware": {
+      "cuda_available": true,
+      "gpu_name": "Tesla T4",
+      "gpu_total_memory_bytes": 15636037632
+    }
+  }
+}
