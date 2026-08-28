@@ -37,7 +37,12 @@ def render_batching_plot(batching: dict, output_path: Path) -> None:
     for x, y, label in zip(throughput, p99_ms, labels):
         ax.annotate(label, (x, y), fontsize=7, textcoords="offset points", xytext=(4, 4))
     ax.set_xlabel("throughput (qps)")
-    ax.set_ylabel("p99 latency (ms)")
+    # "drain latency," not "client latency": each point is a saturating
+    # probe, so p99 here is dominated by queue position in a fixed request
+    # budget, not by per-request service time. Stated on the axis itself,
+    # not only in the table's footnote below, since a reader who looks at
+    # just the figure would otherwise have no way to know.
+    ax.set_ylabel("p99 drain latency (ms, saturating probe)")
     ax.set_title("Dynamic batching: throughput vs. p99 latency")
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
@@ -195,6 +200,14 @@ ranker, **{prerank['mean_prerank_consistency']:.1%}** survive pre-ranking
 NDCG@10 = {prerank['cascade_ndcg_10']:.4f}, recall@100 = {prerank['cascade_recall_100']:.4f}.
 Phase 1's own first-stage (lexical-only) baseline over the same
 {prerank['num_queries']} queries: NDCG@10 = {PHASE1_BASELINE_NDCG_10:.4f}.
+*The pre-rank MLP's weight initialization was not seeded when this run was
+produced (fixed for future runs -- `torch.manual_seed()` now precedes
+`build_mlp()` in `kaggle/phase4_driver.py`), so the survivor-set-dependent
+figures above (prerank-consistency, recall@100, and to a lesser extent
+NDCG@10) reflect one particular initialization rather than a fully
+reproducible result. The qualitative finding -- the cascade beating Phase
+1's baseline by a wide margin -- is not sensitive to this; the exact
+decimal values are.*
 
 ## Dynamic batching: throughput vs. p99 latency
 

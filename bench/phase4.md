@@ -19,6 +19,14 @@ ranker, **64.5%** survive pre-ranking
 NDCG@10 = 0.7394, recall@100 = 0.6299.
 Phase 1's own first-stage (lexical-only) baseline over the same
 97 queries: NDCG@10 = 0.4903.
+*The pre-rank MLP's weight initialization was not seeded when this run was
+produced (fixed for future runs -- `torch.manual_seed()` now precedes
+`build_mlp()` in `kaggle/phase4_driver.py`), so the survivor-set-dependent
+figures above (prerank-consistency, recall@100, and to a lesser extent
+NDCG@10) reflect one particular initialization rather than a fully
+reproducible result. The qualitative finding -- the cascade beating Phase
+1's baseline by a wide margin -- is not sensitive to this; the exact
+decimal values are.*
 
 ## Dynamic batching: throughput vs. p99 latency
 
