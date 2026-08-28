@@ -32,6 +32,7 @@ from rank.encode_candidates import DEV_NEGATIVE_POOL_DEPTH, read_run_truncated
 from rank.prerank_consistency import prerank_consistency
 from rank.prerank_features import fit_scaler
 from rank.prerank_mlp import (
+    SEED,
     build_mlp,
     build_training_examples,
     load_dense_scores_and_lengths,
@@ -135,6 +136,16 @@ def run_prerank_and_consistency() -> dict:
     features, labels = build_training_examples(dev_run, dev_qrels, dense_scores, doc_lengths)
     print(f"training on {len(features)} examples from {len(dev_run)} dev queries")
     scaler = fit_scaler(features)
+    # Before build_mlp(), not just before train_mlp(): nn.Linear's weight
+    # init draws from torch's global RNG at construction time, so this must
+    # precede build_mlp() to be reproducible, matching
+    # test_prerank_mlp.py's own precedent. build_training_examples()'s
+    # negative sampling is already seeded (rank.prerank_mlp.SEED) but the
+    # model's own weight init never was -- discovered because
+    # cascade_recall_100 (a set-membership metric over the MLP's survivor
+    # sets) moved between two runs of otherwise-identical code, which a
+    # seeded init would not have allowed.
+    torch.manual_seed(SEED)
     model = build_mlp()
     train_mlp(model, features, labels, scaler, epochs=50)
 

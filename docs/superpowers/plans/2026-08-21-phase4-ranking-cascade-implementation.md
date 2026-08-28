@@ -1840,6 +1840,7 @@ from rank.encode_candidates import DEV_NEGATIVE_POOL_DEPTH, read_run_truncated
 from rank.prerank_consistency import prerank_consistency
 from rank.prerank_features import fit_scaler
 from rank.prerank_mlp import (
+    SEED,
     build_mlp,
     build_training_examples,
     load_dense_scores_and_lengths,
@@ -1943,6 +1944,16 @@ def run_prerank_and_consistency() -> dict:
     features, labels = build_training_examples(dev_run, dev_qrels, dense_scores, doc_lengths)
     print(f"training on {len(features)} examples from {len(dev_run)} dev queries")
     scaler = fit_scaler(features)
+    # Before build_mlp(), not just before train_mlp(): nn.Linear's weight
+    # init draws from torch's global RNG at construction time, so this must
+    # precede build_mlp() to be reproducible, matching
+    # test_prerank_mlp.py's own precedent. build_training_examples()'s
+    # negative sampling is already seeded (rank.prerank_mlp.SEED) but the
+    # model's own weight init never was -- discovered because
+    # cascade_recall_100 (a set-membership metric over the MLP's survivor
+    # sets) moved between two runs of otherwise-identical code, which a
+    # seeded init would not have allowed.
+    torch.manual_seed(SEED)
     model = build_mlp()
     train_mlp(model, features, labels, scaler, epochs=50)
 
@@ -2239,7 +2250,12 @@ def render_batching_plot(batching: dict, output_path: Path) -> None:
     for x, y, label in zip(throughput, p99_ms, labels):
         ax.annotate(label, (x, y), fontsize=7, textcoords="offset points", xytext=(4, 4))
     ax.set_xlabel("throughput (qps)")
-    ax.set_ylabel("p99 latency (ms)")
+    # "drain latency," not "client latency": each point is a saturating
+    # probe, so p99 here is dominated by queue position in a fixed request
+    # budget, not by per-request service time. Stated on the axis itself,
+    # not only in the table's footnote below, since a reader who looks at
+    # just the figure would otherwise have no way to know.
+    ax.set_ylabel("p99 drain latency (ms, saturating probe)")
     ax.set_title("Dynamic batching: throughput vs. p99 latency")
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
@@ -2397,6 +2413,14 @@ ranker, **{prerank['mean_prerank_consistency']:.1%}** survive pre-ranking
 NDCG@10 = {prerank['cascade_ndcg_10']:.4f}, recall@100 = {prerank['cascade_recall_100']:.4f}.
 Phase 1's own first-stage (lexical-only) baseline over the same
 {prerank['num_queries']} queries: NDCG@10 = {PHASE1_BASELINE_NDCG_10:.4f}.
+*The pre-rank MLP's weight initialization was not seeded when this run was
+produced (fixed for future runs -- `torch.manual_seed()` now precedes
+`build_mlp()` in `kaggle/phase4_driver.py`), so the survivor-set-dependent
+figures above (prerank-consistency, recall@100, and to a lesser extent
+NDCG@10) reflect one particular initialization rather than a fully
+reproducible result. The qualitative finding -- the cascade beating Phase
+1's baseline by a wide margin -- is not sensitive to this; the exact
+decimal values are.*
 
 ## Dynamic batching: throughput vs. p99 latency
 
