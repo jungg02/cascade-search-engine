@@ -1,0 +1,176 @@
+{
+  "runs": [
+    {
+      "discipline": "shed",
+      "arrival_rate_qps": 943.5173047740784,
+      "achieved_qps": 413.3596008962819,
+      "dispatched_qps": 932.4761211626865,
+      "latency_us": {
+        "count": 9452,
+        "min_us": 52.41,
+        "p50_us": 6066.21,
+        "p95_us": 195310.023,
+        "p99_us": 377017.25,
+        "p999_us": 462512.833,
+        "max_us": 467563.948
+      },
+      "queue_delay_us": {
+        "count": 9452,
+        "min_us": 41.238,
+        "p50_us": 2634.832,
+        "p95_us": 10282.691,
+        "p99_us": 16082.059,
+        "p999_us": 23009.004,
+        "max_us": 27883.82
+      },
+      "shed_count": 5262
+    },
+    {
+      "discipline": "shed",
+      "arrival_rate_qps": 1258.0230730321045,
+      "achieved_qps": 425.9939670544263,
+      "dispatched_qps": 1251.8400119716546,
+      "latency_us": {
+        "count": 12642,
+        "min_us": 46.442,
+        "p50_us": 5572.75,
+        "p95_us": 187086.446,
+        "p99_us": 196042.587,
+        "p999_us": 202733.468,
+        "max_us": 206832.074
+      },
+      "queue_delay_us": {
+        "count": 12642,
+        "min_us": 40.535,
+        "p50_us": 3742.344,
+        "p95_us": 14788.197,
+        "p99_us": 23849.57,
+        "p999_us": 34607.022,
+        "max_us": 37333.084
+      },
+      "shed_count": 8340
+    },
+    {
+      "discipline": "shed",
+      "arrival_rate_qps": 1887.0346095481568,
+      "achieved_qps": 412.79650920455424,
+      "dispatched_qps": 1863.5238095385453,
+      "latency_us": {
+        "count": 18825,
+        "min_us": 44.746,
+        "p50_us": 6390.162,
+        "p95_us": 194707.904,
+        "p99_us": 216719.831,
+        "p999_us": 234914.341,
+        "max_us": 239885.615
+      },
+      "queue_delay_us": {
+        "count": 18825,
+        "min_us": 34.202,
+        "p50_us": 5146.535,
+        "p95_us": 22753.739,
+        "p99_us": 38426.341,
+        "p999_us": 55252.311,
+        "max_us": 61652.904
+      },
+      "shed_count": 14655
+    },
+    {
+      "discipline": "unbounded",
+      "arrival_rate_qps": 943.5173047740784,
+      "achieved_qps": 535.576658959307,
+      "dispatched_qps": 535.576658959307,
+      "latency_us": {
+        "count": 9452,
+        "min_us": 6389.972,
+        "p50_us": 5177211.085,
+        "p95_us": 7364087.216,
+        "p99_us": 7591293.231,
+        "p999_us": 7645053.105,
+        "max_us": 7651773.026
+      },
+      "queue_delay_us": {
+        "count": 9452,
+        "min_us": 36.097,
+        "p50_us": 4707755.66,
+        "p95_us": 6967055.141,
+        "p99_us": 7188433.355,
+        "p999_us": 7240622.635,
+        "max_us": 7253023.817
+      },
+      "shed_count": 0
+    },
+    {
+      "discipline": "unbounded",
+      "arrival_rate_qps": 1258.0230730321045,
+      "achieved_qps": 551.3559396378963,
+      "dispatched_qps": 551.3559396378963,
+      "latency_us": {
+        "count": 12642,
+        "min_us": 5073.829,
+        "p50_us": 8031285.325,
+        "p95_us": 12468342.085,
+        "p99_us": 12843684.482,
+        "p999_us": 12922427.472,
+        "max_us": 12932125.635
+      },
+      "queue_delay_us": {
+        "count": 12642,
+        "min_us": 92.278,
+        "p50_us": 7636327.84,
+        "p95_us": 12066680.067,
+        "p99_us": 12441373.319,
+        "p999_us": 12516173.982,
+        "max_us": 12528883.591
+      },
+      "shed_count": 0
+    },
+    {
+      "discipline": "unbounded",
+      "arrival_rate_qps": 1887.0346095481568,
+      "achieved_qps": 547.5222103763261,
+      "dispatched_qps": 547.5222103763261,
+      "latency_us": {
+        "count": 18825,
+        "min_us": 4807.641,
+        "p50_us": 14169555.935,
+        "p95_us": 23412643.771,
+        "p99_us": 24187279.132,
+        "p999_us": 24367447.006,
+        "max_us": 24385575.859
+      },
+      "queue_delay_us": {
+        "count": 18825,
+        "min_us": 101.433,
+        "p50_us": 13756673.336,
+        "p95_us": 23005362.636,
+        "p99_us": 23775519.174,
+        "p999_us": 23953276.051,
+        "max_us": 23971215.119
+      },
+      "shed_count": 0
+    }
+  ],
+  "active_providers": [
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "provenance": {
+    "timestamp_utc": "2026-08-28T08:54:12.287304+00:00",
+    "git_sha": "e1ed6cafa07998dc2bbd32cbc61c16febd72276c",
+    "git_dirty": null,
+    "hardware": {
+      "model": "unknown",
+      "cpu": "unknown",
+      "cores": "unknown",
+      "memory_bytes": "unknown",
+      "platform": "Linux-6.12.90+-x86_64-with-glibc2.35"
+    },
+    "python": "3.12.13",
+    "kaggle_hardware": {
+      "cuda_available": true,
+      "gpu_name": "Tesla T4",
+      "gpu_total_memory_bytes": 15636037632
+    }
+  }
+}
