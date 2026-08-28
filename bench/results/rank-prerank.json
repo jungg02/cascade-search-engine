@@ -1,8 +1,8 @@
 {
-  "mean_prerank_consistency": 0.18494845360824744,
+  "mean_prerank_consistency": 0.6454639175257731,
   "num_queries": 97,
-  "cascade_ndcg_10": 0.35934474778875664,
-  "cascade_recall_100": 0.639951137464459,
+  "cascade_ndcg_10": 0.7393738950516104,
+  "cascade_recall_100": 0.6299368315784033,
   "top_k_survivors": 100,
   "run_depth": 100,
   "active_providers": [
@@ -10,8 +10,8 @@
     "CPUExecutionProvider"
   ],
   "provenance": {
-    "timestamp_utc": "2026-08-27T10:56:38.598880+00:00",
-    "git_sha": "cde154ec38ae4b94ac4b78eb98aec5e5173246ae",
+    "timestamp_utc": "2026-08-28T08:46:53.168799+00:00",
+    "git_sha": "e1ed6cafa07998dc2bbd32cbc61c16febd72276c",
     "git_dirty": null,
     "hardware": {
       "model": "unknown",

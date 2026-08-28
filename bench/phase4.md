@@ -1,19 +1,5 @@
 # Phase 4: Ranking Cascade and Heterogeneous Serving
 
-> **⚠️ STALE — every number below is known wrong, pending a re-run.** This
-> report was rendered before a fix wave corrected two defects in how it was
-> measured: (1) the cross-encoder was exported without `token_type_ids`,
-> silently zeroing its query/passage segment signal, so every NDCG@10 and
-> prerank-consistency number below reflects a cascade *worse than the BM25
-> first-stage baseline it's meant to improve on* — not this phase's real
-> result; (2) the batching/queue-discipline harness was effectively
-> closed-loop, so `shed_count: 0` across every row below is an artifact of a
-> load generator that never reached the offered rate, not a genuine "no
-> shedding needed" finding. Both are fixed in code; this file will be
-> regenerated (`PYTHONPATH=py uv run python -m rank.report`) once the
-> corrected pipeline has been re-run on Kaggle and fresh `bench/results/
-> rank-*.json` files are downloaded.
-
 ## Execution provider check
 
 All sub-experiments ran on `CUDAExecutionProvider` as requested.
@@ -28,9 +14,11 @@ as a separate recall channel.
 ## Prerank-consistency
 
 Of the true top-100 under the full cross-encoder
-ranker, **18.5%** survive pre-ranking
+ranker, **64.5%** survive pre-ranking
 (mean over 97 dl19+dl20 queries). Full-cascade result:
-NDCG@10 = 0.3593, recall@100 = 0.6400.
+NDCG@10 = 0.7394, recall@100 = 0.6299.
+Phase 1's own first-stage (lexical-only) baseline over the same
+97 queries: NDCG@10 = 0.4903.
 
 ## Dynamic batching: throughput vs. p99 latency
 
@@ -38,38 +26,44 @@ NDCG@10 = 0.3593, recall@100 = 0.6400.
 
 | max_batch_size | max_wait_ms | throughput (qps) | p50 (ms) | p99 (ms) |
 |---|---|---|---|---|
-| 32 | 20 | 664.0 | 17.25 | 27.33 |
-| 8 | 20 | 601.3 | 9.44 | 13.61 |
-| 32 | 5 | 537.0 | 6.99 | 9.77 |
-| 8 | 5 | 528.3 | 7.09 | 9.81 |
-| 1 | 5 | 316.2 | 3.09 | 3.76 |
-| 1 | 0 | 313.8 | 3.11 | 3.94 |
-| 1 | 20 | 312.4 | 3.11 | 4.31 |
-| 8 | 0 | 312.4 | 3.13 | 3.92 |
-| 32 | 0 | 307.4 | 3.17 | 3.95 |
+| 8 | 0 | 629.0 | 3933.39 | 7731.29 |
+| 8 | 20 | 626.4 | 3919.26 | 7762.51 |
+| 8 | 5 | 609.2 | 4162.25 | 7992.00 |
+| 32 | 0 | 487.8 | 5156.86 | 10036.10 |
+| 32 | 5 | 485.9 | 5112.87 | 10045.13 |
+| 32 | 20 | 476.8 | 5309.10 | 10246.02 |
+| 1 | 20 | 458.0 | 5382.33 | 10626.72 |
+| 1 | 0 | 456.9 | 5408.21 | 10653.22 |
+| 1 | 5 | 449.2 | 5623.65 | 10841.14 |
+
+*Each row is a saturating probe (a fixed request budget drained as fast as the config allows), not a fixed client arrival rate -- latency here is drain-dominated and only comparable config-to-config at equal budget, not an absolute client-side number. The queue-discipline table below offers a real specified arrival rate, where latency is absolute.*
 
 ## Precision comparison (at the best-throughput batching setting)
 
-| precision | throughput (qps) | p99 (ms) | cascade NDCG@10 | delta vs. fp32 |
-|---|---|---|---|---|
-| fp32 | 665.3 | 27.27 | 0.3594 | +0.0000 |
-| fp16 | 703.2 | 25.21 | 0.3593 | +0.0000 |
-| int8 | 350.3 | 62.48 | 0.3617 | +0.0024 |
+| precision | throughput (qps) | p99 (ms) | p999 (ms) | max (ms) | cascade NDCG@10 | delta vs. fp32 |
+|---|---|---|---|---|---|---|
+| fp32 | 623.3 | 7803.83 | 7873.08 | 7873.29 | 0.7394 | +0.0000 |
+| fp16 | 1352.9 | 3571.93 | 3598.69 | 3600.52 | 0.7393 | -0.0000 |
+| int8 | 65.7 | 74578.57 | 75082.65 | 75105.01 | 0.7374 | -0.0020 |
+
+*throughput/NDCG columns are the real cross-precision comparison. The latency columns are saturating-probe numbers (see the batching table above) -- a slower precision drains the same request budget over a longer wall clock, so its p99/p999/max inflate roughly in proportion to its slowness, as an artifact of the probe rather than of serving latency at a fixed rate. Each precision's own p999-vs-p99 ratio is still meaningful (same probe, same budget); the absolute milliseconds across rows are not directly comparable to a production client's experience.*
 
 ## Queue discipline: load-shedding vs. unbounded
 
-| discipline | arrival rate (qps) | p99 (ms) | shed count |
-|---|---|---|---|
-| shed | 996.0 | 26.35 | 0 |
-| shed | 1328.0 | 26.72 | 0 |
-| shed | 1992.0 | 26.61 | 0 |
-| unbounded | 996.0 | 27.08 | 0 |
-| unbounded | 1328.0 | 27.24 | 0 |
-| unbounded | 1992.0 | 27.14 | 0 |
+| discipline | arrival rate (qps) | achieved (qps) | p99 (ms) | queue delay p99 (ms) | shed count |
+|---|---|---|---|---|---|
+| shed | 943.5 | 413.4 | 377.02 | 16.08 | 5262 |
+| shed | 1258.0 | 426.0 | 196.04 | 23.85 | 8340 |
+| shed | 1887.0 | 412.8 | 216.72 | 38.43 | 14655 |
+| unbounded | 943.5 | 535.6 | 7591.29 | 7188.43 | 0 |
+| unbounded | 1258.0 | 551.4 | 12843.68 | 12441.37 | 0 |
+| unbounded | 1887.0 | 547.5 | 24187.28 | 23775.52 | 0 |
+
+*p99 pools served and shed requests together, so a `shed` row's percentile is over a mixed population (a shed request fails fast, far below what a served one costs) -- at these disciplines' typical shed fractions the effect on the reported p99 is modest (roughly one percentile point per ~15% shed), not large enough to change which configuration looks better, but the number is not purely "latency of requests that were served."*
 
 ## Configuration
 
 - model: `cross-encoder/ms-marco-MiniLM-L-6-v2`
-- git SHA: `cde154ec38ae4b94ac4b78eb98aec5e5173246ae`
+- git SHA: `e1ed6cafa07998dc2bbd32cbc61c16febd72276c`
 - GPU: Tesla T4
-- timestamp: 2026-08-27T10:56:38.598880+00:00
+- timestamp: 2026-08-28T08:46:53.168799+00:00
