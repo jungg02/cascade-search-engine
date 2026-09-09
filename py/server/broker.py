@@ -6,7 +6,7 @@ docs/superpowers/specs/2026-09-10-phase2b-broker-design.md §4.
 
 from __future__ import annotations
 
-from concurrent.futures import ALL_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor
 from typing import NamedTuple
 
 from server.client import SearchClient
@@ -48,8 +48,8 @@ class Broker:
             self._pool.submit(client.dispatch, query, k=k, timeout_s=self._timeout_s): i
             for i, client in enumerate(self._clients)
         }
-        wait(futures, return_when=ALL_COMPLETED)
         merged: list[MergedResult] = []
+        # Unconditional .result() calls block until every future is done, propagate the first exception encountered, and ensure no partial merge is possible.
         for future, shard_index in futures.items():
             response = future.result()
             merged.extend(
