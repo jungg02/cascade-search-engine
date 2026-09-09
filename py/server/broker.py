@@ -7,7 +7,7 @@ docs/superpowers/specs/2026-09-10-phase2b-broker-design.md §4.
 from __future__ import annotations
 
 from concurrent.futures import ALL_COMPLETED, FIRST_COMPLETED, ThreadPoolExecutor, wait
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from server.client import SearchClient
 
@@ -114,14 +114,24 @@ class HedgedBroker(Broker):
         # exceeds its own p95" means.
         _, not_done = wait(primaries, timeout=self._hedge_delay_s, return_when=ALL_COMPLETED)
 
-        results: list = [None] * n
+        # Pass 1: Submit all backups immediately, without waiting. By the time
+        # Pass 2 runs, all backups have been executing concurrently since here,
+        # not serially stalled behind the previous shard's race resolution.
+        backups: dict[int, Any] = {}  # shard_index -> backup_future
         for i, primary in enumerate(primaries):
             if primary in not_done:
                 backup = self._backup_pool.submit(
                     self._replica_clients[i].dispatch, query, k=k, timeout_s=self._timeout_s
                 )
                 self.backup_calls_sent += 1
-                done, _ = wait([primary, backup], return_when=FIRST_COMPLETED)
+                backups[i] = backup
+
+        # Pass 2: Resolve each shard's result. For shards with a backup, race
+        # primary and backup; for shards without, just take the primary.
+        results: list = [None] * n
+        for i, primary in enumerate(primaries):
+            if i in backups:
+                done, _ = wait([primary, backups[i]], return_when=FIRST_COMPLETED)
                 results[i] = next(iter(done)).result()
             else:
                 results[i] = primary.result()
@@ -135,7 +145,7 @@ class HedgedBroker(Broker):
         return MergedResponse(merged[:k])
 
     def close(self) -> None:
-        self._backup_pool.shutdown(wait=False)
+        self._backup_pool.shutdown(wait=True)
         for client in self._replica_clients:
             client.close()
         super().close()
