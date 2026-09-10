@@ -1,0 +1,263 @@
+{
+  "server": "cascade-grpc-hedged-broker",
+  "n": 8,
+  "query_set": "dev",
+  "num_distinct_queries": 6980,
+  "qps": 20.0,
+  "duration_s": 10.0,
+  "repeats": 3,
+  "zipf_s": 1.0,
+  "client_workers": 32,
+  "server_workers": 2,
+  "queue_depth": 64,
+  "cache_capacity": 200,
+  "algorithm": "wand",
+  "hits": 10,
+  "shard_p95_us_warmup": [
+    21037.417,
+    9812.292,
+    10279.375,
+    10731.791,
+    11861.416,
+    13442.0,
+    11281.25,
+    11409.959
+  ],
+  "hedge_delay_us": 21037.417,
+  "baseline_repeats": [
+    {
+      "offered_qps": 20.0,
+      "achieved_qps": 19.088871981109186,
+      "requests": 190,
+      "completed": 190,
+      "errors": 0,
+      "wall_s": 9.953443042,
+      "latency": {
+        "count": 190,
+        "min_us": 1016.685,
+        "p50_us": 6938.368,
+        "p95_us": 23085.661,
+        "p99_us": 40738.31,
+        "p999_us": 49473.062,
+        "max_us": 49473.062
+      },
+      "service": {
+        "count": 190,
+        "min_us": 902.208,
+        "p50_us": 5324.125,
+        "p95_us": 21001.959,
+        "p99_us": 37528.208,
+        "p999_us": 47436.917,
+        "max_us": 47436.917
+      },
+      "queue_delay": {
+        "count": 190,
+        "min_us": 14.831,
+        "p50_us": 992.882,
+        "p95_us": 3188.676,
+        "p99_us": 4386.973,
+        "p999_us": 4733.59,
+        "max_us": 4733.59
+      }
+    },
+    {
+      "offered_qps": 20.0,
+      "achieved_qps": 21.188112886248756,
+      "requests": 211,
+      "completed": 211,
+      "errors": 0,
+      "wall_s": 9.958414,
+      "latency": {
+        "count": 211,
+        "min_us": 933.212,
+        "p50_us": 6153.866,
+        "p95_us": 18878.7,
+        "p99_us": 27619.199,
+        "p999_us": 43465.58,
+        "max_us": 43465.58
+      },
+      "service": {
+        "count": 211,
+        "min_us": 798.916,
+        "p50_us": 4530.834,
+        "p95_us": 17309.875,
+        "p99_us": 26491.667,
+        "p999_us": 43336.458,
+        "max_us": 43336.458
+      },
+      "queue_delay": {
+        "count": 211,
+        "min_us": 15.422,
+        "p50_us": 1015.965,
+        "p95_us": 3198.768,
+        "p99_us": 3637.525,
+        "p999_us": 6034.641,
+        "max_us": 6034.641
+      }
+    },
+    {
+      "offered_qps": 20.0,
+      "achieved_qps": 19.707079815408985,
+      "requests": 196,
+      "completed": 196,
+      "errors": 0,
+      "wall_s": 9.945664291,
+      "latency": {
+        "count": 196,
+        "min_us": 774.652,
+        "p50_us": 5217.099,
+        "p95_us": 16043.381,
+        "p99_us": 29519.752,
+        "p999_us": 30336.993,
+        "max_us": 30336.993
+      },
+      "service": {
+        "count": 196,
+        "min_us": 746.0,
+        "p50_us": 3199.0,
+        "p95_us": 12814.792,
+        "p99_us": 19812.625,
+        "p999_us": 27200.0,
+        "max_us": 27200.0
+      },
+      "queue_delay": {
+        "count": 196,
+        "min_us": 15.079,
+        "p50_us": 1044.902,
+        "p95_us": 3248.857,
+        "p99_us": 8781.843,
+        "p999_us": 9707.127,
+        "max_us": 9707.127
+      }
+    }
+  ],
+  "hedged_repeats": [
+    {
+      "offered_qps": 20.0,
+      "achieved_qps": 19.089661755055776,
+      "requests": 190,
+      "completed": 190,
+      "errors": 0,
+      "wall_s": 9.95303125,
+      "latency": {
+        "count": 190,
+        "min_us": 677.352,
+        "p50_us": 6475.89,
+        "p95_us": 26629.262,
+        "p99_us": 50529.436,
+        "p999_us": 63003.912,
+        "max_us": 63003.912
+      },
+      "service": {
+        "count": 190,
+        "min_us": 655.5,
+        "p50_us": 4825.875,
+        "p95_us": 25874.667,
+        "p99_us": 47365.708,
+        "p999_us": 59888.25,
+        "max_us": 59888.25
+      },
+      "queue_delay": {
+        "count": 190,
+        "min_us": 15.644,
+        "p50_us": 820.151,
+        "p95_us": 3163.728,
+        "p99_us": 4760.089,
+        "p999_us": 5265.293,
+        "max_us": 5265.293
+      },
+      "backup_calls_sent": 50,
+      "total_shard_calls": 1520
+    },
+    {
+      "offered_qps": 20.0,
+      "achieved_qps": 21.162297219259923,
+      "requests": 211,
+      "completed": 211,
+      "errors": 0,
+      "wall_s": 9.970562166,
+      "latency": {
+        "count": 211,
+        "min_us": 745.023,
+        "p50_us": 5264.458,
+        "p95_us": 16661.651,
+        "p99_us": 45636.385,
+        "p999_us": 55890.219,
+        "max_us": 55890.219
+      },
+      "service": {
+        "count": 211,
+        "min_us": 725.917,
+        "p50_us": 4240.708,
+        "p95_us": 14521.417,
+        "p99_us": 43465.375,
+        "p999_us": 45211.208,
+        "max_us": 45211.208
+      },
+      "queue_delay": {
+        "count": 211,
+        "min_us": 16.7,
+        "p50_us": 1116.901,
+        "p95_us": 3264.246,
+        "p99_us": 5064.29,
+        "p999_us": 47969.011,
+        "max_us": 47969.011
+      },
+      "backup_calls_sent": 46,
+      "total_shard_calls": 1688
+    },
+    {
+      "offered_qps": 20.0,
+      "achieved_qps": 19.704784047368598,
+      "requests": 196,
+      "completed": 196,
+      "errors": 0,
+      "wall_s": 9.946823042,
+      "latency": {
+        "count": 196,
+        "min_us": 709.986,
+        "p50_us": 4967.345,
+        "p95_us": 17141.426,
+        "p99_us": 23590.485,
+        "p999_us": 27998.06,
+        "max_us": 27998.06
+      },
+      "service": {
+        "count": 196,
+        "min_us": 686.791,
+        "p50_us": 3689.458,
+        "p95_us": 15597.666,
+        "p99_us": 23110.208,
+        "p999_us": 26078.0,
+        "max_us": 26078.0
+      },
+      "queue_delay": {
+        "count": 196,
+        "min_us": 14.861,
+        "p50_us": 701.202,
+        "p95_us": 3186.063,
+        "p99_us": 5725.016,
+        "p999_us": 9545.432,
+        "max_us": 9545.432
+      },
+      "backup_calls_sent": 0,
+      "total_shard_calls": 1568
+    }
+  ],
+  "baseline_p99_us_median": 29519.752,
+  "hedged_p99_us_median": 45636.385,
+  "extra_load_fraction": 0.020100502512562814,
+  "provenance": {
+    "timestamp_utc": "2026-09-10T03:37:33.349632+00:00",
+    "git_sha": "b84661c385c21de10be7049514e30558c8da5d84",
+    "git_dirty": true,
+    "hardware": {
+      "model": "Mac14,2",
+      "cpu": "Apple M2",
+      "cores": "8",
+      "memory_bytes": "8589934592",
+      "platform": "macOS-26.3.1-arm64-arm-64bit"
+    },
+    "python": "3.12.7"
+  }
+}
