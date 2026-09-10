@@ -76,6 +76,7 @@ def main() -> None:
     server_kwargs = dict(
         workers=args.server_workers, queue_depth=args.queue_depth,
         cache_capacity=args.cache_capacity, algorithm=args.algorithm,
+        ready_timeout_s=120.0,
     )
 
     # 1. Warm-up: measure each shard's own p95 service latency,
