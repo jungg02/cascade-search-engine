@@ -64,3 +64,39 @@ def test_no_merge_pool_created_when_merge_policy_is_none(tmp_path):
     nrt.add("d1", "second doc triggers flush")
     assert nrt.segment_count == 1
     nrt.close()  # must not raise even though no merge pool exists
+
+
+def test_merge_failure_resets_in_progress_flag_and_a_later_merge_still_fires(tmp_path, monkeypatch):
+    policy = TieredMergePolicy(merge_factor=2, max_segments=3)
+    nrt = NrtIndex(tmp_path, flush_threshold_docs=2, merge_policy=policy)
+
+    import nrt.index as index_module
+    real_build_segment = index_module.build_segment
+    call_count = 0
+
+    def flaky_build_segment(tsv_path, index_dir, build_index_bin=None):
+        nonlocal call_count
+        call_count += 1
+        # Fail on the first merge build (seg_id >= 4), not on the regular flushes
+        # Flushes produce seg_0, seg_1, seg_2, seg_3; the first merge produces seg_4
+        if call_count == 5:  # seg_4 is the merged segment, 5th call
+            raise RuntimeError("simulated transient build failure")
+        return real_build_segment(tsv_path, index_dir, build_index_bin=build_index_bin)
+
+    monkeypatch.setattr(index_module, "build_segment", flaky_build_segment)
+
+    for batch in range(4):  # 4 flushes of 2 docs -> 4 segments, over max_segments=3
+        for i in range(2):
+            nrt.add(f"d{batch}_{i}", f"badger passage {batch}_{i}")
+
+    assert _poll_until(lambda: call_count >= 1, timeout_s=5.0)
+    assert _poll_until(lambda: not nrt._merge_in_progress, timeout_s=5.0)
+
+    # The first (flaky) merge failed and reset the flag; nothing else
+    # triggers a retry on its own (no more flushes are coming), so force
+    # one more evaluation the way a later flush naturally would.
+    with nrt._lock:
+        nrt._maybe_schedule_merge_locked()
+
+    assert _poll_until(lambda: nrt.segment_count <= policy.max_segments, timeout_s=5.0)
+    nrt.close()

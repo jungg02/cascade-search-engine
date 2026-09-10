@@ -123,12 +123,23 @@ class NrtIndex:
         merging needs the original text, not just the built index),
         rebuilds via build_segment, then swaps the merged segment in under
         the lock. This re-tokenizes from source text; it is not a
-        postings-level merge (spec §4)."""
-        segments_dir = self._base_dir / "segments"
-        merged_tsv = segments_dir / f"seg_{merge_id}.tsv"
-        merged_tsv.write_text("".join(seg.source_tsv.read_text() for seg in chosen))
-        merged_dir = segments_dir / f"seg_{merge_id}"
-        merged_segment = build_segment(merged_tsv, merged_dir, build_index_bin=self._build_index_bin)
+        postings-level merge (spec §4). If the build fails before the lock
+        is acquired, the failure handler resets the _merge_in_progress flag
+        and re-raises, so a failed merge does not permanently disable
+        merging (important because a stale flag would prevent all future
+        merges from being attempted, which is worse than the original
+        duplicate-plan race this guard was added to prevent)."""
+        try:
+            segments_dir = self._base_dir / "segments"
+            merged_tsv = segments_dir / f"seg_{merge_id}.tsv"
+            merged_tsv.write_text("".join(seg.source_tsv.read_text() for seg in chosen))
+            merged_dir = segments_dir / f"seg_{merge_id}"
+            merged_segment = build_segment(merged_tsv, merged_dir, build_index_bin=self._build_index_bin)
+        except Exception as exc:
+            with self._lock:
+                self._merge_in_progress = False
+            print(f"nrt: merge {merge_id} failed, will retry on next flush: {exc!r}")
+            raise
 
         # Identity-based filtering, not list.remove()/`in` -- Segment wraps
         # a pybind11 Index with no custom __eq__, and `chosen` holds the
