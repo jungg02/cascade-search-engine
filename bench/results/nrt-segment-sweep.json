@@ -1,0 +1,184 @@
+{
+  "corpus": "msmarco-passage",
+  "fixed_corpus_docs": 200000,
+  "num_query_set_queries": 50,
+  "points": [
+    {
+      "n": 1,
+      "p50_us": 3546.432,
+      "p99_us": 8070.102,
+      "requests": 87,
+      "summary": {
+        "offered_qps": 20.0,
+        "achieved_qps": 17.564513182482596,
+        "requests": 87,
+        "completed": 87,
+        "errors": 0,
+        "wall_s": 4.953168875,
+        "latency": {
+          "count": 87,
+          "min_us": 399.469,
+          "p50_us": 3546.432,
+          "p95_us": 6002.516,
+          "p99_us": 8070.102,
+          "p999_us": 8070.102,
+          "max_us": 8070.102
+        },
+        "service": {
+          "count": 87,
+          "min_us": 324.709,
+          "p50_us": 1735.791,
+          "p95_us": 3751.459,
+          "p99_us": 4981.209,
+          "p999_us": 4981.209,
+          "max_us": 4981.209
+        },
+        "queue_delay": {
+          "count": 87,
+          "min_us": 30.06,
+          "p50_us": 1358.264,
+          "p95_us": 3280.161,
+          "p99_us": 4742.632,
+          "p999_us": 4742.632,
+          "max_us": 4742.632
+        }
+      }
+    },
+    {
+      "n": 2,
+      "p50_us": 3105.599,
+      "p99_us": 8764.593,
+      "requests": 87,
+      "summary": {
+        "offered_qps": 20.0,
+        "achieved_qps": 17.566058244258247,
+        "requests": 87,
+        "completed": 87,
+        "errors": 0,
+        "wall_s": 4.952733208,
+        "latency": {
+          "count": 87,
+          "min_us": 303.28,
+          "p50_us": 3105.599,
+          "p95_us": 5782.191,
+          "p99_us": 8764.593,
+          "p999_us": 8764.593,
+          "max_us": 8764.593
+        },
+        "service": {
+          "count": 87,
+          "min_us": 208.291,
+          "p50_us": 1194.625,
+          "p95_us": 2526.5,
+          "p99_us": 3705.625,
+          "p999_us": 3705.625,
+          "max_us": 3705.625
+        },
+        "queue_delay": {
+          "count": 87,
+          "min_us": 27.934,
+          "p50_us": 1841.702,
+          "p95_us": 3403.962,
+          "p99_us": 8217.426,
+          "p999_us": 8217.426,
+          "max_us": 8217.426
+        }
+      }
+    },
+    {
+      "n": 4,
+      "p50_us": 2898.553,
+      "p99_us": 8481.701,
+      "requests": 87,
+      "summary": {
+        "offered_qps": 20.0,
+        "achieved_qps": 17.572505185497825,
+        "requests": 87,
+        "completed": 87,
+        "errors": 0,
+        "wall_s": 4.950916166,
+        "latency": {
+          "count": 87,
+          "min_us": 361.54,
+          "p50_us": 2898.553,
+          "p95_us": 6117.654,
+          "p99_us": 8481.701,
+          "p999_us": 8481.701,
+          "max_us": 8481.701
+        },
+        "service": {
+          "count": 87,
+          "min_us": 196.416,
+          "p50_us": 1101.25,
+          "p95_us": 3624.083,
+          "p99_us": 4910.75,
+          "p999_us": 4910.75,
+          "max_us": 4910.75
+        },
+        "queue_delay": {
+          "count": 87,
+          "min_us": 38.414,
+          "p50_us": 1569.828,
+          "p95_us": 3257.467,
+          "p99_us": 4363.868,
+          "p999_us": 4363.868,
+          "max_us": 4363.868
+        }
+      }
+    },
+    {
+      "n": 8,
+      "p50_us": 3398.939,
+      "p99_us": 37117.495,
+      "requests": 87,
+      "summary": {
+        "offered_qps": 20.0,
+        "achieved_qps": 17.445677871828114,
+        "requests": 87,
+        "completed": 87,
+        "errors": 0,
+        "wall_s": 4.986908542,
+        "latency": {
+          "count": 87,
+          "min_us": 472.598,
+          "p50_us": 3398.939,
+          "p95_us": 7026.327,
+          "p99_us": 37117.495,
+          "p999_us": 37117.495,
+          "max_us": 37117.495
+        },
+        "service": {
+          "count": 87,
+          "min_us": 235.083,
+          "p50_us": 1341.458,
+          "p95_us": 3938.333,
+          "p99_us": 29492.833,
+          "p999_us": 29492.833,
+          "max_us": 29492.833
+        },
+        "queue_delay": {
+          "count": 87,
+          "min_us": 32.456,
+          "p50_us": 1846.894,
+          "p95_us": 3704.44,
+          "p99_us": 7624.662,
+          "p999_us": 7624.662,
+          "max_us": 7624.662
+        }
+      }
+    }
+  ],
+  "provenance": {
+    "timestamp_utc": "2026-09-10T11:22:11.157884+00:00",
+    "git_sha": "a7211d69df6d6179456530aea772a5b42297108f",
+    "git_dirty": true,
+    "hardware": {
+      "model": "Mac14,2",
+      "cpu": "Apple M2",
+      "cores": "8",
+      "memory_bytes": "8589934592",
+      "platform": "macOS-26.3.1-arm64-arm-64bit"
+    },
+    "python": "3.12.7"
+  }
+}

@@ -1,0 +1,161 @@
+{
+  "corpus": "msmarco-passage",
+  "base_doc_count": 50000,
+  "stream_doc_count": 5000,
+  "max_segments": 8,
+  "merge_factor": 4,
+  "num_query_set_queries": 50,
+  "points": [
+    {
+      "flush_threshold_docs": 50,
+      "lag_p99_us": 55591.54192451388,
+      "lag_samples": 836,
+      "query_p99_us": 6810.657,
+      "query_summary": {
+        "offered_qps": 20.0,
+        "achieved_qps": 17.57285509745674,
+        "requests": 87,
+        "completed": 87,
+        "errors": 0,
+        "wall_s": 4.950817583,
+        "latency": {
+          "count": 87,
+          "min_us": 426.122,
+          "p50_us": 3253.744,
+          "p95_us": 5866.654,
+          "p99_us": 6810.657,
+          "p999_us": 6810.657,
+          "max_us": 6810.657
+        },
+        "service": {
+          "count": 87,
+          "min_us": 173.958,
+          "p50_us": 1164.792,
+          "p95_us": 2511.0,
+          "p99_us": 6657.0,
+          "p999_us": 6657.0,
+          "max_us": 6657.0
+        },
+        "queue_delay": {
+          "count": 87,
+          "min_us": 20.622,
+          "p50_us": 2266.412,
+          "p95_us": 3248.11,
+          "p99_us": 4840.728,
+          "p999_us": 4840.728,
+          "max_us": 4840.728
+        }
+      },
+      "final_segment_count": 7,
+      "collisions_skipped": 4118,
+      "timed_out": 46,
+      "merge_before_after": {
+        "before": 8,
+        "after": 6
+      }
+    },
+    {
+      "flush_threshold_docs": 200,
+      "lag_p99_us": 109243.66605468094,
+      "lag_samples": 837,
+      "query_p99_us": 27455.373,
+      "query_summary": {
+        "offered_qps": 20.0,
+        "achieved_qps": 17.570287863505946,
+        "requests": 87,
+        "completed": 87,
+        "errors": 0,
+        "wall_s": 4.951540958,
+        "latency": {
+          "count": 87,
+          "min_us": 301.601,
+          "p50_us": 3309.037,
+          "p95_us": 5913.862,
+          "p99_us": 27455.373,
+          "p999_us": 27455.373,
+          "max_us": 27455.373
+        },
+        "service": {
+          "count": 87,
+          "min_us": 208.75,
+          "p50_us": 1091.0,
+          "p95_us": 2771.917,
+          "p99_us": 3290.334,
+          "p999_us": 3290.334,
+          "max_us": 3290.334
+        },
+        "queue_delay": {
+          "count": 87,
+          "min_us": 16.595,
+          "p50_us": 2078.429,
+          "p95_us": 3226.922,
+          "p99_us": 26364.373,
+          "p999_us": 26364.373,
+          "max_us": 26364.373
+        }
+      },
+      "final_segment_count": 6,
+      "collisions_skipped": 4115,
+      "timed_out": 48,
+      "merge_before_after": null
+    },
+    {
+      "flush_threshold_docs": 1000,
+      "lag_p99_us": 209045.24996876717,
+      "lag_samples": 836,
+      "query_p99_us": 5735.779,
+      "query_summary": {
+        "offered_qps": 20.0,
+        "achieved_qps": 17.571619665216105,
+        "requests": 87,
+        "completed": 87,
+        "errors": 0,
+        "wall_s": 4.951165667,
+        "latency": {
+          "count": 87,
+          "min_us": 493.489,
+          "p50_us": 3271.572,
+          "p95_us": 5363.241,
+          "p99_us": 5735.779,
+          "p999_us": 5735.779,
+          "max_us": 5735.779
+        },
+        "service": {
+          "count": 87,
+          "min_us": 210.792,
+          "p50_us": 1186.584,
+          "p95_us": 2562.958,
+          "p99_us": 3014.75,
+          "p999_us": 3014.75,
+          "max_us": 3014.75
+        },
+        "queue_delay": {
+          "count": 87,
+          "min_us": 65.206,
+          "p50_us": 1902.423,
+          "p95_us": 3225.048,
+          "p99_us": 3270.058,
+          "p999_us": 3270.058,
+          "max_us": 3270.058
+        }
+      },
+      "final_segment_count": 2,
+      "collisions_skipped": 4106,
+      "timed_out": 58,
+      "merge_before_after": null
+    }
+  ],
+  "provenance": {
+    "timestamp_utc": "2026-09-10T11:16:50.507422+00:00",
+    "git_sha": "a7211d69df6d6179456530aea772a5b42297108f",
+    "git_dirty": true,
+    "hardware": {
+      "model": "Mac14,2",
+      "cpu": "Apple M2",
+      "cores": "8",
+      "memory_bytes": "8589934592",
+      "platform": "macOS-26.3.1-arm64-arm-64bit"
+    },
+    "python": "3.12.7"
+  }
+}

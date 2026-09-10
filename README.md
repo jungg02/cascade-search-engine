@@ -16,7 +16,7 @@ Full design: [`CASCADE_SEARCH_PLAN.md`](CASCADE_SEARCH_PLAN.md).
 | 3 — Dense recall | ANN Pareto frontier | **done** |
 | 4 — Ranking cascade | batching + precision tables | **done** |
 | 5 — Video, multi-field | field ablations | not started |
-| 6 — Near-real-time indexing | freshness/latency tradeoff | not started |
+| 6 — Near-real-time indexing | `bench/phase6.md` | **done** |
 
 ## Layout
 
@@ -198,6 +198,27 @@ uv run python -m rank.encode_candidates    # dense score + doc length features -
 # ... upload to Kaggle, run kaggle/phase4_driver.py there, download results ...
 uv run python -m rank.report               # -> bench/phase4.md, bench/plots/phase4-batching.png
 ```
+
+## Running Phase 6 (near-real-time indexing)
+
+Needs the Phase 1 index build tooling (`cpp/build/build_index`, see Phase 1 setup
+above) — Phase 6 runs entirely in-process against the pybind11 binding, with no
+`cpp/server/` involved.
+
+```bash
+cd py
+PYTHONPATH=. uv run --project .. pytest nrt/ -v
+
+PYTHONPATH=. uv run --project .. python -m nrt.lag_experiment
+PYTHONPATH=. uv run --project .. python -m nrt.segment_sweep
+PYTHONPATH=. uv run --project .. python -m nrt.report_6
+```
+
+Writes `bench/results/nrt-lag.json`, `bench/results/nrt-segment-sweep.json`,
+`bench/phase6.md`, and `bench/plots/phase6-*.png`. See
+`docs/superpowers/specs/2026-09-10-phase6-nrt-indexing-design.md` for the design
+and `bench/phase6.md`'s own "Known limitations" section for what these numbers
+do and don't claim.
 
 ## Ground rules
 
