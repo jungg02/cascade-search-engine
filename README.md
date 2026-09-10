@@ -12,7 +12,7 @@ Full design: [`CASCADE_SEARCH_PLAN.md`](CASCADE_SEARCH_PLAN.md).
 |---|---|---|
 | 0 — Harness | `bench/baselines.md` | **done** |
 | 1 — C++ index + BlockMax-WAND | `bench/phase1.md` | **done** |
-| 2 — Serving, sharding, tail latency | capacity statement | sub-project A done |
+| 2 — Serving, sharding, tail latency | capacity statement | **done** |
 | 3 — Dense recall | ANN Pareto frontier | **done** |
 | 4 — Ranking cascade | batching + precision tables | **done** |
 | 5 — Video, multi-field | field ablations | not started |
@@ -118,6 +118,26 @@ uv run python -m server.report           # -> bench/phase2a.md
 The server itself (`cpp/build/server_bin <index_dir> [--port=P] [--workers=N]
 [--queue-depth=D] [--cache-capacity=C] [--algorithm=wand|blockmax-wand|daat-or]`)
 can also be run standalone for manual testing.
+
+## Running Phase 2 (sub-project B: sharded broker, tail latency, hedging)
+
+Needs sub-project A's built server binary and generated proto stubs (see
+above), plus the Phase 1 monolithic index for the N=1 baseline point.
+Partitions the corpus and builds shard indexes on first use (cached after —
+see `server.partition_corpus`/`server.build_shards`'s skip-if-exists logic).
+
+```bash
+cd py
+PYTHONPATH=. uv run --project .. python -m server.build_shards --n 4 8 16
+PYTHONPATH=. uv run --project .. python -m server.tail_latency
+PYTHONPATH=. uv run --project .. python -m server.hedging
+PYTHONPATH=. uv run --project .. python -m server.report_2b   # -> bench/phase2b.md
+```
+
+Each shard's `docid` is local to that shard and BM25 statistics are
+per-shard, not corpus-global — this phase makes a latency claim about the
+sharded configuration, not a quality (NDCG) one; see
+`docs/superpowers/specs/2026-09-10-phase2b-broker-design.md` §3.
 
 ## Running Phase 3 (dense recall and the ANN Pareto frontier)
 
