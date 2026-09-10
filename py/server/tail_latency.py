@@ -41,7 +41,7 @@ def run_point(n: int, index_dirs: list[Path], base_port: int, args, queries: lis
     with ShardCluster(
         index_dirs, base_port=base_port, workers=args.server_workers,
         queue_depth=args.queue_depth, cache_capacity=args.cache_capacity,
-        algorithm=args.algorithm,
+        algorithm=args.algorithm, ready_timeout_s=120.0,
     ) as cluster:
         broker = Broker.for_addresses(cluster.addresses)
         repeats = [
