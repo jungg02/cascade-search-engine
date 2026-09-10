@@ -90,25 +90,25 @@ def test_multi_shard_hedging_is_independent_per_shard():
 
 def test_two_simultaneously_slow_shards_hedge_in_parallel():
     # Both shard primaries are slow (both exceed hedge_delay_s); both have
-    # fast replicas. Proves backups are submitted in parallel (Pass 1), not
-    # serially stalled behind the first shard's race resolution. The
-    # dispatch() should complete in ~one race-resolution time, not ~two.
+    # replicas with non-zero delay. Proves backups are submitted in parallel
+    # (Pass 1), not serially stalled behind the first shard's race resolution.
+    # With parallel submission, dispatch() completes in ~one hedge+race cycle
+    # (~0.15s: hedge_delay_s 0.05 + replica_delay 0.1). Serialized would be
+    # ~two cycles (~0.30s: repeat twice). Assertion < 0.2s discriminates.
     primary0 = _FakeClient(docid=10, score=1.0, delay_s=0.5)
-    replica0 = _FakeClient(docid=11, score=2.0, delay_s=0.0)
+    replica0 = _FakeClient(docid=11, score=2.0, delay_s=0.1)
     primary1 = _FakeClient(docid=20, score=3.0, delay_s=0.5)
-    replica1 = _FakeClient(docid=21, score=4.0, delay_s=0.0)
+    replica1 = _FakeClient(docid=21, score=4.0, delay_s=0.1)
     broker = HedgedBroker([primary0, primary1], [replica0, replica1], hedge_delay_s=0.05)
 
     start = time.perf_counter()
     response = broker.dispatch("q", k=10)
     elapsed = time.perf_counter() - start
 
-    # Both results should come from replicas (the fast ones).
+    # Both results should come from replicas.
     assert {r.docid for r in response.results} == {11, 21}
     assert broker.backup_calls_sent == 2
-    # With parallel backups, elapsed time should be roughly one hedge+race
-    # resolution cycle, not two. A single race cycle is ~0.05 (hedge_delay_s)
-    # plus some small overhead; two serial cycles would be ~0.1+. Use a
-    # generous bound (0.3s) to avoid flaking under CI load.
-    assert elapsed < 0.3
+    # Parallel backups: ~0.15s. Serialized would be ~0.27s. Assert < 0.2s
+    # discriminates cleanly without being tight enough to flake under CI load.
+    assert elapsed < 0.2
     broker.close()
