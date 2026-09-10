@@ -955,7 +955,12 @@ def test_merge_failure_resets_in_progress_flag_and_a_later_merge_still_fires(tmp
     def flaky_build_segment(tsv_path, index_dir, build_index_bin=None):
         nonlocal call_count
         call_count += 1
-        if call_count == 1:
+        # call_count == 5, not 1: as actually implemented, the flush calls to
+        # build_segment for seg_0..seg_3 (4 flushes) come first; the merge
+        # that combines them into seg_4 is the 5th build_segment call. Failing
+        # on call_count == 1 would fail the very first segment build (not a
+        # merge at all) and would never exercise merge-failure recovery.
+        if call_count == 5:
             raise RuntimeError("simulated transient build failure")
         return real_build_segment(tsv_path, index_dir, build_index_bin=build_index_bin)
 

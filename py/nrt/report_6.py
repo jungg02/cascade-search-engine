@@ -97,12 +97,73 @@ def _merge_evidence(points: list[dict]) -> str:
     return "No merge event was captured in this run's trace (re-run with a smaller threshold if this section is empty)."
 
 
+def _sweep_collision_bullet(lag: dict) -> str:
+    points = lag["points"]
+    stream_doc_count = lag["stream_doc_count"]
+    added_counts = [p["lag_samples"] for p in points]
+    lo, hi = min(added_counts), max(added_counts)
+
+    max_threshold_point = next(
+        p for p in points if p["flush_threshold_docs"] == max(
+            pt["flush_threshold_docs"] for pt in points
+        )
+    )
+    return (
+        f"**The freshness sweep is not a clean single-variable sweep of the auto-flush "
+        f"threshold, because most of the write stream was never added at all.** At every "
+        f"threshold, only about {lo}-{hi} of the {stream_doc_count:,} stream docs "
+        f"(`lag_samples`) were ever actually added -- the rest were skipped as "
+        f"duplicate-key collisions (`collisions_skipped`) or timed out waiting for a lag "
+        f"observation (`timed_out`). At `flush_threshold_docs="
+        f"{max_threshold_point['flush_threshold_docs']}`, only "
+        f"{max_threshold_point['lag_samples']} docs were ever added in total, which never "
+        f"reached that point's own {max_threshold_point['flush_threshold_docs']}-doc "
+        f"auto-flush threshold -- its `final_segment_count="
+        f"{max_threshold_point['final_segment_count']}` result reflects a single bulk flush "
+        f"at end-of-stream, not periodic threshold-triggered flushing."
+    )
+
+
+def _query_p99_sample_size_bullet(lag: dict) -> str:
+    points = lag["points"]
+    counts = {p["query_summary"]["latency"]["count"] for p in points}
+    p99_equals_max = all(
+        p["query_summary"]["latency"]["p99_us"] == p["query_summary"]["latency"]["max_us"]
+        for p in points
+    )
+    (count,) = counts if len(counts) == 1 else (None,)
+    count_str = str(count) if count is not None else "/".join(
+        str(c) for c in sorted(counts)
+    )
+    if not p99_equals_max:
+        # The whole point of this bullet is the p99==max collapse at this
+        # sample size; if the committed JSON ever changes such that it no
+        # longer holds for every point, fail loudly rather than silently
+        # publish a claim the data no longer supports.
+        raise AssertionError(
+            "query p99_us no longer equals max_us for every freshness point -- "
+            "the 'p99 is a single-draw extreme value' bullet in report_6.py no "
+            "longer describes the committed JSON and needs to be rewritten."
+        )
+    return (
+        f"**Each freshness point's query benchmark has too few samples "
+        f"({count_str} requests) for p99 to be a stable statistic.** "
+        f"`LatencyRecorder`'s nearest-rank percentile formula "
+        f"(`rank = max(1, ceil(p/100 * n))`) makes p99 equal to the single maximum "
+        f"observation at this sample size (confirmed: `p99_us == max_us` for all "
+        f"points in this report), so `query p99` in the freshness table above "
+        f"should be read as one noisy draw, not a repeatable tail latency."
+    )
+
+
 def render() -> None:
     lag = _load(LAG_PATH)
     sweep = _load(SWEEP_PATH)
 
     freshness_plot = _plot_freshness(lag["points"])
     segment_plot = _plot_segment_count(sweep["points"])
+    sweep_collision_bullet = _sweep_collision_bullet(lag)
+    query_p99_sample_size_bullet = _query_p99_sample_size_bullet(lag)
 
     report = f"""# Phase 6: Near-Real-Time Indexing
 
@@ -148,6 +209,16 @@ mean the multi-segment configuration's relevance is not evaluated here, the same
 `bench/phase2b.md` established for shards.
 - **Flush is synchronous and blocks new writes for its duration.** This design does not overlap \
 flush with the next write batch, unlike Lucene's concurrent in-memory segment writer.
+- **A concurrent read blocks during flush, not just concurrent writes.** \
+`NrtIndex._flush_locked` holds the index lock for the full synchronous segment \
+build, so `search()` calls issued during a flush block until the flush \
+completes. `_run_merge` avoids this by building outside the lock and only \
+reacquiring for the final segment-list swap; `_flush_locked` does not, because \
+its input is the live, mutable write buffer rather than already-published \
+segments. No experiment in this report exercises concurrent search-during-flush, \
+so this does not affect any number above.
+- {sweep_collision_bullet}
+- {query_p99_sample_size_bullet}
 - **The tombstone over-fetch bound (`k + len(tombstones)`) is a fixed heuristic**, not a tuned \
 bound against how many tombstones plausibly cluster near the top-k of a single segment.
 """
