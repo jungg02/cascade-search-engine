@@ -817,6 +817,10 @@ Change `__init__`'s signature and body to add the merge policy and pool:
         # bounded and predictable, matching py/server/report.py's
         # single-background-task convention.
         self._merge_pool = ThreadPoolExecutor(max_workers=1) if merge_policy is not None else None
+        # Guards against submitting a second merge job for the same
+        # over-budget segment list before the first one has run and swapped
+        # its result in -- see _maybe_schedule_merge_locked.
+        self._merge_in_progress = False
         self._lock = threading.Lock()
         self._segments: list[Segment] = list(initial_segments) if initial_segments else []
         self._tombstones: set[str] = set()
@@ -828,7 +832,7 @@ Change `__init__`'s signature and body to add the merge policy and pool:
 
 (`merge_policy` is inserted before `search_workers`/`build_index_bin` in the parameter list; every call site in this plan passes these by keyword, so the reordering is safe.)
 
-Add the merge trigger to the end of `_flush_locked` (still inside the `with self._lock` context that called it):
+Add the merge trigger to the end of `_flush_locked` (still inside the `with self._lock` context that called it), calling a new helper rather than inlining the trigger directly:
 
 ```python
     def _flush_locked(self) -> None:
@@ -846,29 +850,70 @@ Add the merge trigger to the end of `_flush_locked` (still inside the `with self
         self._buffer = []
         self._last_flush_time = time.monotonic()
 
-        if self._merge_policy is not None:
-            plan = self._merge_policy.maybe_merge(self._segments)
-            if plan is not None:
-                merge_id = self._next_segment_id
-                self._next_segment_id += 1
-                self._merge_pool.submit(self._run_merge, plan, merge_id)
+        self._maybe_schedule_merge_locked()
 ```
 
-Add `_run_merge` as a new method on `NrtIndex`, and replace the existing `close` method (from Task 3) with a version that also shuts down the merge pool:
+Add `_maybe_schedule_merge_locked`, `_run_merge`, and (unchanged from the version above) `close` as new/modified methods on `NrtIndex`:
 
 ```python
+    def _maybe_schedule_merge_locked(self) -> None:
+        """Called with self._lock held, from _flush_locked and again from
+        _run_merge once a merge completes (both on success and on
+        failure -- see _run_merge). Submits at most one merge job at a
+        time: self._merge_in_progress guards this because, without it,
+        two flushes (or a flush and a just-finished merge) that both
+        observe an over-budget segment list before either merge has run
+        would compute and submit the *same* smallest-segments plan twice
+        -- the second job would then crash reading a source TSV the first
+        job already deleted (confirmed empirically: this was Task 4's
+        original defect, caught by the implementer before it reached
+        review). Calling this again at the end of _run_merge -- not only
+        from flush -- means convergence to at-or-under max_segments does
+        not depend on further write traffic: a burst of flushes that
+        pushes segment count well over budget is worked down by
+        consecutive merge rounds on their own, chained back to back."""
+        if self._merge_policy is None or self._merge_in_progress:
+            return
+        plan = self._merge_policy.maybe_merge(self._segments)
+        if plan is None:
+            return
+        self._merge_in_progress = True
+        merge_id = self._next_segment_id
+        self._next_segment_id += 1
+        self._merge_pool.submit(self._run_merge, plan, merge_id)
+
     def _run_merge(self, chosen: list[Segment], merge_id: int) -> None:
         """Runs on the background merge thread -- concatenates the chosen
         segments' source TSVs (this is why Segment retains source_tsv:
         merging needs the original text, not just the built index),
         rebuilds via build_segment, then swaps the merged segment in under
         the lock. This re-tokenizes from source text; it is not a
-        postings-level merge (spec §4)."""
-        segments_dir = self._base_dir / "segments"
-        merged_tsv = segments_dir / f"seg_{merge_id}.tsv"
-        merged_tsv.write_text("".join(seg.source_tsv.read_text() for seg in chosen))
-        merged_dir = segments_dir / f"seg_{merge_id}"
-        merged_segment = build_segment(merged_tsv, merged_dir, build_index_bin=self._build_index_bin)
+        postings-level merge (spec §4).
+
+        The build step (source-TSV concatenation, then build_segment's
+        subprocess call) can fail -- disk full, a corrupted source TSV, a
+        transient build_index crash. If it does, self._merge_in_progress
+        must still be cleared: the ThreadPoolExecutor's Future is never
+        inspected by any caller (this project has no task queue with
+        result callbacks), so an exception here would otherwise leave the
+        flag stuck True forever, permanently disabling every future merge
+        for this NrtIndex's lifetime with no visible error -- silently
+        worse than doing nothing. The except clause resets the flag,
+        prints a visible warning (this background thread has no other way
+        to surface a failure), and re-raises so the underlying error is
+        still not fully swallowed for anyone who does inspect the Future
+        (e.g. a test)."""
+        try:
+            segments_dir = self._base_dir / "segments"
+            merged_tsv = segments_dir / f"seg_{merge_id}.tsv"
+            merged_tsv.write_text("".join(seg.source_tsv.read_text() for seg in chosen))
+            merged_dir = segments_dir / f"seg_{merge_id}"
+            merged_segment = build_segment(merged_tsv, merged_dir, build_index_bin=self._build_index_bin)
+        except Exception as exc:
+            with self._lock:
+                self._merge_in_progress = False
+            print(f"nrt: merge {merge_id} failed, will retry on next flush: {exc!r}")
+            raise
 
         # Identity-based filtering, not list.remove()/`in` -- Segment wraps
         # a pybind11 Index with no custom __eq__, and `chosen` holds the
@@ -879,6 +924,12 @@ Add `_run_merge` as a new method on `NrtIndex`, and replace the existing `close`
         with self._lock:
             self._segments = [s for s in self._segments if id(s) not in chosen_ids]
             self._segments.append(merged_segment)
+            self._merge_in_progress = False
+            # Chain: one merge round may not be enough to get back at or
+            # under max_segments (e.g. a burst of flushes queued up while
+            # this merge was running) -- re-evaluate immediately rather
+            # than waiting for the next flush, which may never come.
+            self._maybe_schedule_merge_locked()
 
         for seg in chosen:
             seg.source_tsv.unlink(missing_ok=True)
@@ -890,10 +941,52 @@ Add `_run_merge` as a new method on `NrtIndex`, and replace the existing `close`
         self._search_pool.shutdown(wait=True)
 ```
 
+**Test addition for this fix:** append one more test to `py/nrt/tests/test_nrt_index_merge.py` proving a failed merge doesn't permanently disable future merges:
+
+```python
+def test_merge_failure_resets_in_progress_flag_and_a_later_merge_still_fires(tmp_path, monkeypatch):
+    policy = TieredMergePolicy(merge_factor=2, max_segments=3)
+    nrt = NrtIndex(tmp_path, flush_threshold_docs=2, merge_policy=policy)
+
+    import nrt.index as index_module
+    real_build_segment = index_module.build_segment
+    call_count = 0
+
+    def flaky_build_segment(tsv_path, index_dir, build_index_bin=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("simulated transient build failure")
+        return real_build_segment(tsv_path, index_dir, build_index_bin=build_index_bin)
+
+    monkeypatch.setattr(index_module, "build_segment", flaky_build_segment)
+
+    for batch in range(4):  # 4 flushes of 2 docs -> 4 segments, over max_segments=3
+        for i in range(2):
+            nrt.add(f"d{batch}_{i}", f"badger passage {batch}_{i}")
+
+    assert _poll_until(lambda: call_count >= 1, timeout_s=5.0)
+    assert _poll_until(lambda: not nrt._merge_in_progress, timeout_s=5.0)
+
+    # The first (flaky) merge failed and reset the flag; nothing else
+    # triggers a retry on its own (no more flushes are coming), so force
+    # one more evaluation the way a later flush naturally would.
+    with nrt._lock:
+        nrt._maybe_schedule_merge_locked()
+
+    assert _poll_until(lambda: nrt.segment_count <= policy.max_segments, timeout_s=5.0)
+    nrt.close()
+```
+
+- [ ] **Step 3b: Run the new failure-path test to verify it fails, then passes**
+
+Run: `cd py && PYTHONPATH=. uv run --project .. pytest nrt/tests/test_nrt_index_merge.py -v`
+Expected before the `_run_merge` try/except fix: hangs or fails (the flag stays stuck True after the simulated failure, so the forced re-evaluation never schedules a second merge and the final `_poll_until` times out). Expected after: all tests (now 3 in this file) pass, including the new one.
+
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cd py && PYTHONPATH=. uv run --project .. pytest nrt/tests/test_nrt_index_merge.py nrt/tests/test_nrt_index.py -v`
-Expected: 6 passed (or all skipped if `cpp/build/build_index` is absent — build it, then re-run to confirm a real pass before moving on).
+Expected: 7 passed (3 in test_nrt_index_merge.py, 4 in test_nrt_index.py) (or all skipped if `cpp/build/build_index` is absent — build it, then re-run to confirm a real pass before moving on).
 
 - [ ] **Step 5: Commit**
 
