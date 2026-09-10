@@ -1,8 +1,8 @@
-"""Broker.dispatch fans out to every client, waits for all of them
-(ALL_COMPLETED -- no shard is optional), and merges by score. Fake
-client-shaped stubs, not real gRPC/server_bin: this test is about the
-merge/wait logic, not the network -- see Task 5 for the real end-to-end
-integration test."""
+"""Broker.dispatch fans out to every client, waits for all of them via
+unconditional `.result()` calls -- no shard is optional -- and merges by
+score. Fake client-shaped stubs, not real gRPC/server_bin: this test is
+about the merge/wait logic, not the network -- see Task 5 for the real
+end-to-end integration test."""
 
 from __future__ import annotations
 

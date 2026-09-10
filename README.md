@@ -129,10 +129,18 @@ see `server.partition_corpus`/`server.build_shards`'s skip-if-exists logic).
 ```bash
 cd py
 PYTHONPATH=. uv run --project .. python -m server.build_shards --n 4 8 16
-PYTHONPATH=. uv run --project .. python -m server.tail_latency
-PYTHONPATH=. uv run --project .. python -m server.hedging
+PYTHONPATH=. uv run --project .. python -m server.tail_latency --server-workers 2
+PYTHONPATH=. uv run --project .. python -m server.hedging --server-workers 2
 PYTHONPATH=. uv run --project .. python -m server.report_2b   # -> bench/phase2b.md
 ```
+
+`--server-workers 2` is what produced the committed numbers in
+`bench/results/server-tail-latency.json`/`server-hedging.json`, an 8GB-RAM
+accommodation (16 concurrent `server_bin` processes at the hedging
+experiment's N=8 is the high-water mark — see the design spec §9). The
+default is 4, matching sub-project A; on a machine with more headroom, the
+default is fine and simply produces a different (probably lower-latency)
+set of numbers than the ones committed here.
 
 Each shard's `docid` is local to that shard and BM25 statistics are
 per-shard, not corpus-global — this phase makes a latency claim about the

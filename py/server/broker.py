@@ -6,6 +6,7 @@ docs/superpowers/specs/2026-09-10-phase2b-broker-design.md §4.
 
 from __future__ import annotations
 
+import threading
 from concurrent.futures import ALL_COMPLETED, FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Any, NamedTuple
 
@@ -86,6 +87,11 @@ class HedgedBroker(Broker):
         # which there are at most N.
         self._backup_pool = ThreadPoolExecutor(max_workers=len(clients))
         self._hedge_delay_s = hedge_delay_s
+        # dispatch() is called from up to 32 concurrent client threads
+        # against one broker instance (see tail_latency.py/hedging.py) --
+        # plain `+=` on these counters is not atomic, so a lock protects
+        # both increments below.
+        self._counter_lock = threading.Lock()
         self.backup_calls_sent = 0
         self.total_shard_calls = 0
 
@@ -102,7 +108,8 @@ class HedgedBroker(Broker):
 
     def dispatch(self, query: str, k: int = 10) -> MergedResponse:
         n = len(self._clients)
-        self.total_shard_calls += n
+        with self._counter_lock:
+            self.total_shard_calls += n
         primaries = [
             self._pool.submit(client.dispatch, query, k=k, timeout_s=self._timeout_s)
             for client in self._clients
@@ -123,7 +130,8 @@ class HedgedBroker(Broker):
                 backup = self._backup_pool.submit(
                     self._replica_clients[i].dispatch, query, k=k, timeout_s=self._timeout_s
                 )
-                self.backup_calls_sent += 1
+                with self._counter_lock:
+                    self.backup_calls_sent += 1
                 backups[i] = backup
 
         # Pass 2: Resolve each shard's result. For shards with a backup, race
