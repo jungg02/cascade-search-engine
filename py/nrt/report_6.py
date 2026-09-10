@@ -110,7 +110,7 @@ def render() -> None:
 
 {_freshness_table(lag["points"])}
 
-![freshness/latency tradeoff]({freshness_plot.relative_to(REPO_ROOT)})
+![freshness/latency tradeoff]({freshness_plot.relative_to(REPORT_PATH.parent)})
 
 Base corpus: {lag['base_doc_count']:,} docs (already indexed). Write stream: \
 {lag['stream_doc_count']:,} docs, added one at a time. `merge_factor={lag['merge_factor']}`, \
@@ -120,7 +120,7 @@ Base corpus: {lag['base_doc_count']:,} docs (already indexed). Write stream: \
 
 {_sweep_table(sweep["points"])}
 
-![query latency vs. segment count]({segment_plot.relative_to(REPO_ROOT)})
+![query latency vs. segment count]({segment_plot.relative_to(REPORT_PATH.parent)})
 
 Fixed corpus: {sweep['fixed_corpus_docs']:,} docs, partitioned into N segments for each point \
 -- the same corpus-shrinkage-per-segment effect `bench/phase2b.md` disclosed for its shards is \
