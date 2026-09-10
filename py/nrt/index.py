@@ -75,6 +75,14 @@ class NrtIndex:
         with self._lock:
             self._flush_locked()
 
+    def delete(self, external_id: str) -> None:
+        """Adds external_id to the tombstone set. Effective on the very
+        next search() call, across every segment current and future -- a
+        tombstone is never migrated or cleared at merge time, because it
+        was never segment-scoped (spec §5)."""
+        with self._lock:
+            self._tombstones.add(external_id)
+
     def _flush_locked(self) -> None:
         if not self._buffer:
             return

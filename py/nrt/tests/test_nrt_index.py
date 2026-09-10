@@ -75,3 +75,30 @@ def test_initial_segments_are_searchable_immediately(tmp_path):
     results = nrt.search("platypus", k=10)
     assert "b0" in _ids(results)
     nrt.close()
+
+
+def test_delete_makes_a_flushed_doc_unfindable(tmp_path):
+    nrt = NrtIndex(tmp_path, flush_threshold_docs=100)
+    nrt.add("victim", "capybara distinctive unique passage")
+    nrt.add("other", "an unrelated second document")
+    nrt.flush()
+
+    assert "victim" in _ids(nrt.search("capybara", k=10))
+
+    nrt.delete("victim")
+    assert "victim" not in _ids(nrt.search("capybara", k=10))
+    # The delete must not remove anything else.
+    assert "other" in _ids(nrt.search("unrelated", k=10))
+    nrt.close()
+
+
+def test_delete_before_the_doc_is_ever_added_still_suppresses_it_once_added(tmp_path):
+    # A delete is a standing tombstone on an external id, not scoped to a
+    # segment that must already exist -- so a delete-before-add is legal
+    # (if unusual) and still suppresses the doc once it lands.
+    nrt = NrtIndex(tmp_path, flush_threshold_docs=100)
+    nrt.delete("d0")
+    nrt.add("d0", "wolverine early tombstone test")
+    nrt.flush()
+    assert "d0" not in _ids(nrt.search("wolverine", k=10))
+    nrt.close()
