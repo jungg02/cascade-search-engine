@@ -4,8 +4,6 @@ A multi-stage search engine built under a fixed end-to-end latency budget, where
 every stage is measured, ablated, and defended with numbers. The deliverable is
 `bench/REPORT.md`, not a demo.
 
-Full design: [`CASCADE_SEARCH_PLAN.md`](CASCADE_SEARCH_PLAN.md).
-
 ## Status
 
 | Phase | What it produces | State |
